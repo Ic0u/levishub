@@ -9,6 +9,7 @@ local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 local Window = Library:CreateWindow("Levis Hub")
 local Folder = Window:AddFolder("Elements")
 local Runtime = Window:AddFolder("Runtime")
+local Cursor = Window:AddFolder("Cursor")
 local ThemeManager = Window:AddFolder("Theme Manager")
 local Configuration = Window:AddFolder("Configuration")
 
@@ -18,14 +19,25 @@ Window:AddDivider()
 local statusLabel = Window:AddLabel({ text = "Status: ready" })
 Window:AddLabel({ text = "RightShift toggles the UI" })
 
-Window:AddButton({
-    text = "Button",
-    flag = "demo_button",
-    callback = function()
-        statusLabel:Set("Status: button pressed")
-        print("[Levis Hub] Button pressed")
+local function cleanName(value, fallback)
+    value = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if value == "" or value == "--" then
+        return fallback or "default"
     end
-})
+    return value
+end
+
+local function selectedName(selected, typed, fallback)
+    selected = cleanName(selected, "")
+    if selected ~= "" then
+        return selected
+    end
+    return cleanName(typed, fallback)
+end
+
+local function setStatus(ok, success, failure)
+    statusLabel:Set(ok and ("Status: " .. success) or ("Status: " .. tostring(failure)))
+end
 
 local demoToggle = Window:AddToggle({
     text = "Toggle",
@@ -34,6 +46,15 @@ local demoToggle = Window:AddToggle({
     callback = function(enabled)
         statusLabel:Set("Status: toggle " .. (enabled and "on" or "off"))
         print("[Levis Hub] Toggle:", enabled)
+    end
+})
+
+Window:AddButton({
+    text = "Button",
+    flag = "demo_button",
+    callback = function()
+        statusLabel:Set("Status: button pressed")
+        print("[Levis Hub] Button pressed")
     end
 })
 
@@ -77,77 +98,231 @@ local demoColor = Folder:AddColor({
     end
 })
 
-local themeColor = ThemeManager:AddColor({
-    text = "Accent",
-    flag = "theme_accent",
-    color = Library:GetTheme().Accent,
-    callback = function(color)
-        Library:SetTheme({ Accent = color })
-        statusLabel:Set("Status: theme updated")
-    end
-})
-
-ThemeManager:AddList({
-    text = "Font",
-    flag = "ui_font",
-    value = "Gotham",
-    values = {
-        "Gotham",
-        "GothamBold",
-        "SourceSans",
-        "SourceSansBold",
-        "Arial",
-        "ArialBold",
-        "Code",
-        "SciFi",
-        "Fantasy",
-        "Arcade",
-        "Cartoon",
-        "Ubuntu"
-    },
-    callback = function(fontName)
-        if Library:SetFont(fontName) then
-            statusLabel:Set("Status: font set to " .. fontName)
-        else
-            statusLabel:Set("Status: invalid font")
-        end
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Save Theme",
-    callback = function()
-        local ok, result = Library:SaveTheme()
-        statusLabel:Set(ok and "Status: theme saved" or ("Status: " .. result))
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Load Theme",
-    callback = function()
-        local ok, result = Library:LoadTheme()
-        if ok then
-            themeColor:SetColor(Library:GetTheme().Accent)
-        end
-        statusLabel:Set(ok and "Status: theme loaded" or ("Status: " .. result))
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Reset Theme",
-    callback = function()
-        Library:ResetTheme()
-        themeColor:SetColor(Library:GetTheme().Accent)
-        statusLabel:Set("Status: theme reset")
-    end
-})
-
 local toggleBind = Folder:AddBind({
     text = "Toggle UI",
     flag = "toggle_ui",
     key = "RightShift",
     callback = function()
         Library:Close()
+    end
+})
+
+local cursorId = ""
+
+Cursor:AddBox({
+    text = "Custom cursor id",
+    flag = "custom_cursor_id",
+    value = "",
+    callback = function(value)
+        cursorId = value
+        if Library.customCursorEnabled then
+            Library:SetCustomCursor(cursorId)
+        end
+    end
+})
+
+Cursor:AddToggle({
+    text = "Custom cursor",
+    flag = "custom_cursor",
+    state = false,
+    callback = function(enabled)
+        if enabled then
+            Library:SetCustomCursor(cursorId)
+        end
+        Library:SetCustomCursorEnabled(enabled)
+        statusLabel:Set("Status: custom cursor " .. (enabled and "on" or "off"))
+    end
+})
+
+Cursor:AddButton({
+    text = "Apply cursor id",
+    callback = function()
+        local ok = Library:SetCustomCursor(cursorId)
+        setStatus(ok, "cursor id applied", "cursor id missing")
+    end
+})
+
+local themeName = "default"
+local selectedTheme = "--"
+local configName = "default"
+local selectedConfig = "--"
+local refreshThemeList = function() end
+local refreshConfigList = function() end
+
+local themeColor = ThemeManager:AddColor({
+    text = "Accent",
+    flag = "theme_accent",
+    color = Library:GetTheme().Accent,
+    callback = function(color)
+        Library:SetTheme({ Accent = color })
+        statusLabel:Set("Status: theme accent stored")
+    end
+})
+
+local fontValues = {
+    "Default",
+    "Gotham",
+    "GothamMedium",
+    "GothamBold",
+    "GothamBlack",
+    "SourceSans",
+    "SourceSansSemibold",
+    "SourceSansBold",
+    "SourceSansItalic",
+    "Arial",
+    "ArialBold",
+    "ArialItalic",
+    "ArialBoldItalic",
+    "Code",
+    "Roboto",
+    "RobotoMono",
+    "Ubuntu",
+    "BuilderSans",
+    "BuilderSansMedium",
+    "BuilderSansBold",
+    "BuilderSansExtraBold",
+    "SciFi",
+    "Arcade",
+    "Fantasy",
+    "Cartoon",
+    "Bodoni",
+    "Garamond",
+    "Highway",
+    "Legacy",
+    "Antique"
+}
+
+local themeFont = ThemeManager:AddList({
+    text = "Font",
+    flag = "ui_font",
+    value = "Default",
+    values = fontValues,
+    callback = function(fontName)
+        local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(fontName)
+        setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
+    end
+})
+
+ThemeManager:AddBox({
+    text = "Custom theme name",
+    flag = "theme_name",
+    value = themeName,
+    callback = function(value)
+        themeName = cleanName(value, "default")
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Create theme",
+    callback = function()
+        local ok, result = Library:SaveTheme(themeName)
+        setStatus(ok, "theme created", result)
+        refreshThemeList()
+    end
+})
+
+local themeDefaultLabel = ThemeManager:AddLabel({ text = "Current default theme: none" })
+
+local themeList = ThemeManager:AddList({
+    text = "Custom themes",
+    flag = "theme_list",
+    value = "--",
+    values = { "--" },
+    callback = function(value)
+        selectedTheme = value
+    end
+})
+
+local function updateThemeDefaultLabel()
+    themeDefaultLabel:Set("Current default theme: " .. (Library:GetDefaultTheme() or "none"))
+end
+
+refreshThemeList = function()
+    if not themeList.ClearValues then return end
+    local themes, err = Library:GetThemeList()
+    themeList:ClearValues()
+    if #themes == 0 then
+        themeList:AddValue("--")
+        themeList:SetValue("--")
+        selectedTheme = "--"
+    else
+        for _, name in next, themes do
+            themeList:AddValue(name)
+        end
+        themeList:SetValue(themes[1])
+        selectedTheme = themes[1]
+    end
+    updateThemeDefaultLabel()
+    if err then
+        statusLabel:Set("Status: " .. err)
+    end
+end
+
+ThemeManager:AddButton({
+    text = "Load theme",
+    callback = function()
+        local name = selectedName(selectedTheme, themeName, "default")
+        local ok, result = Library:LoadTheme(name)
+        if ok then
+            themeColor:SetColor(Library:GetTheme().Accent)
+            themeFont:SetValue(Library:GetTheme().Font or "Default")
+        end
+        setStatus(ok, "theme loaded", result)
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Overwrite theme",
+    callback = function()
+        local name = selectedName(selectedTheme, themeName, "default")
+        local ok, result = Library:SaveTheme(name)
+        setStatus(ok, "theme overwritten", result)
+        refreshThemeList()
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Delete theme",
+    callback = function()
+        local ok, result = Library:DeleteTheme(selectedName(selectedTheme, themeName, "default"))
+        setStatus(ok, "theme deleted", result)
+        refreshThemeList()
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Refresh list",
+    callback = function()
+        refreshThemeList()
+        statusLabel:Set("Status: theme list refreshed")
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Set as default",
+    callback = function()
+        local ok, result = Library:SetDefaultTheme(selectedName(selectedTheme, themeName, "default"))
+        setStatus(ok, "default theme set", result)
+        updateThemeDefaultLabel()
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Reset default",
+    callback = function()
+        local ok, result = Library:ResetDefaultTheme()
+        setStatus(ok, "default theme reset", result)
+        updateThemeDefaultLabel()
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Reset theme",
+    callback = function()
+        Library:ResetTheme()
+        themeColor:SetColor(Library:GetTheme().Accent)
+        themeFont:SetValue("Default")
+        statusLabel:Set("Status: theme reset")
     end
 })
 
@@ -211,22 +386,115 @@ Runtime:AddButton({
     end
 })
 
-Configuration:AddButton({
-    text = "Save Config",
-    callback = function()
-        local ok, result = Library:SaveConfig("default")
-        statusLabel:Set(ok and "Status: config saved" or ("Status: " .. result))
+Configuration:AddBox({
+    text = "Config name",
+    flag = "config_name",
+    value = configName,
+    callback = function(value)
+        configName = cleanName(value, "default")
     end
 })
 
 Configuration:AddButton({
-    text = "Load Config",
+    text = "Create config",
     callback = function()
-        local ok, result = Library:LoadConfig("default")
+        local ok, result = Library:SaveConfig(configName)
+        setStatus(ok, "config created", result)
+        refreshConfigList()
+    end
+})
+
+local autoloadLabel = Configuration:AddLabel({ text = "Current autoload config: none" })
+
+local configList = Configuration:AddList({
+    text = "Config list",
+    flag = "config_list",
+    value = "--",
+    values = { "--" },
+    callback = function(value)
+        selectedConfig = value
+    end
+})
+
+local function updateAutoloadLabel()
+    autoloadLabel:Set("Current autoload config: " .. (Library:GetAutoloadConfig() or "none"))
+end
+
+refreshConfigList = function()
+    if not configList.ClearValues then return end
+    local configs, err = Library:GetConfigList()
+    configList:ClearValues()
+    if #configs == 0 then
+        configList:AddValue("--")
+        configList:SetValue("--")
+        selectedConfig = "--"
+    else
+        for _, name in next, configs do
+            configList:AddValue(name)
+        end
+        configList:SetValue(configs[1])
+        selectedConfig = configs[1]
+    end
+    updateAutoloadLabel()
+    if err then
+        statusLabel:Set("Status: " .. err)
+    end
+end
+
+Configuration:AddButton({
+    text = "Load config",
+    callback = function()
+        local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
         if ok then
             themeColor:SetColor(Library:GetTheme().Accent)
+            themeFont:SetValue(Library:GetTheme().Font or "Default")
+            updateAutoloadLabel()
         end
-        statusLabel:Set(ok and "Status: config loaded" or ("Status: " .. result))
+        setStatus(ok, "config loaded", result)
+    end
+})
+
+Configuration:AddButton({
+    text = "Overwrite config",
+    callback = function()
+        local ok, result = Library:SaveConfig(selectedName(selectedConfig, configName, "default"))
+        setStatus(ok, "config overwritten", result)
+        refreshConfigList()
+    end
+})
+
+Configuration:AddButton({
+    text = "Delete config",
+    callback = function()
+        local ok, result = Library:DeleteConfig(selectedName(selectedConfig, configName, "default"))
+        setStatus(ok, "config deleted", result)
+        refreshConfigList()
+    end
+})
+
+Configuration:AddButton({
+    text = "Refresh list",
+    callback = function()
+        refreshConfigList()
+        statusLabel:Set("Status: config list refreshed")
+    end
+})
+
+Configuration:AddButton({
+    text = "Set as autoload",
+    callback = function()
+        local ok, result = Library:SetAutoloadConfig(selectedName(selectedConfig, configName, "default"))
+        setStatus(ok, "autoload config set", result)
+        updateAutoloadLabel()
+    end
+})
+
+Configuration:AddButton({
+    text = "Reset autoload",
+    callback = function()
+        local ok, result = Library:ResetAutoloadConfig()
+        setStatus(ok, "autoload config reset", result)
+        updateAutoloadLabel()
     end
 })
 
@@ -238,3 +506,5 @@ Configuration:AddButton({
 })
 
 Library:Init()
+refreshThemeList()
+refreshConfigList()

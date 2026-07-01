@@ -1,6 +1,8 @@
 local STIFFNESS = 180
 local DAMPING = 12
-local DRAG_LERP_SPEED = 0.2
+local DRAG_LERP_SPEED = 0.16
+local DRAG_TILT_MULTIPLIER = 0.026
+local MAX_DRAG_ROTATION = 18
 local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
 local library = {
     flags = {},
@@ -12,13 +14,17 @@ local library = {
     DAMPING = DAMPING,
     font = Enum.Font.Gotham,
     fontOverride = false,
+    originalFonts = {},
+    customCursorEnabled = false,
+    customCursorId = "",
     theme = {
         Accent = DEFAULT_ACCENT
     },
     defaultTheme = {
         Accent = DEFAULT_ACCENT
     },
-    themeObjects = {}
+    themeObjects = {},
+    liveAccentThemes = false
 }
 
 --Services
@@ -29,12 +35,14 @@ local inputService = game:GetService "UserInputService"
 local httpService = game:GetService "HttpService"
 
 --Locals
-local dragging, dragStart, startPos, dragObject, dragTarget, dragLastMouseX, dragVelocityX, dragRotationVelocity
+local dragging, dragStart, startPos, dragObject, dragTarget, dragLastMouseX, dragVelocityX, dragRotationVelocity, dragOriginalClips
 
 local ROOT_FOLDER = "Levis Hub"
 local THEME_FOLDER = ROOT_FOLDER .. "/Theme"
 local CONFIG_FOLDER = ROOT_FOLDER .. "/Configuration"
 local THEME_FILE = THEME_FOLDER .. "/theme.json"
+local THEME_DEFAULT_FILE = THEME_FOLDER .. "/default.txt"
+local CONFIG_AUTOLOAD_FILE = CONFIG_FOLDER .. "/autoload.txt"
 
 local blacklistedKeys = { --add or remove keys if you find the need to
     Enum.KeyCode.Unknown, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Slash, Enum
@@ -63,7 +71,7 @@ local function offsetUDim2(value, x, y)
 end
 
 local function getAccent()
-    return library.theme.Accent or DEFAULT_ACCENT
+    return DEFAULT_ACCENT
 end
 
 local function updateDragTarget(dt)
@@ -145,6 +153,96 @@ local function sanitizeConfigName(name)
     return name
 end
 
+local function displaySaveName(path)
+    path = tostring(path or ""):gsub("\\", "/")
+    local name = path:match("([^/]+)$") or path
+    return name:gsub("%.json$", "")
+end
+
+local function buildSavePath(folder, name)
+    return folder .. "/" .. sanitizeConfigName(name)
+end
+
+local function listJsonFiles(folder)
+    if not hasFileApi() then
+        return {}, "executor file APIs unavailable"
+    end
+    if type(listfiles) ~= "function" then
+        return {}, "executor listfiles API unavailable"
+    end
+    if not isfolder(folder) then
+        return {}
+    end
+
+    local values = {}
+    for _, path in next, listfiles(folder) do
+        if tostring(path):lower():match("%.json$") then
+            table.insert(values, displaySaveName(path))
+        end
+    end
+    table.sort(values)
+    return values
+end
+
+local function readMarker(path)
+    if not hasFileApi() or not isfile(path) then
+        return nil
+    end
+
+    local value = tostring(readfile(path) or "")
+    value = value:gsub("^%s+", ""):gsub("%s+$", "")
+    if value == "" then
+        return nil
+    end
+    return displaySaveName(value)
+end
+
+local function writeMarker(path, value)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+    writefile(path, displaySaveName(value))
+    return true, path
+end
+
+local function clearMarker(path)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    if type(delfile) == "function" and isfile(path) then
+        delfile(path)
+    elseif type(writefile) == "function" then
+        writefile(path, "")
+    end
+    return true, path
+end
+
+local function deleteSaveFile(path)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    if not isfile(path) then
+        return false, "file not found"
+    end
+    if type(delfile) ~= "function" then
+        return false, "executor delfile API unavailable"
+    end
+    delfile(path)
+    return true, path
+end
+
+local function normalizeCursorImage(imageId)
+    imageId = tostring(imageId or ""):gsub("%s+", "")
+    if imageId == "" then
+        return ""
+    end
+    if imageId:match("^rbxassetid://") or imageId:match("^http") then
+        return imageId
+    end
+
+    local digits = imageId:match("%d+")
+    return digits and ("rbxassetid://" .. digits) or imageId
+end
+
 local function encodeJson(data)
     local ok, encoded = pcall(function()
         return httpService:JSONEncode(data)
@@ -174,8 +272,11 @@ function library:Create(class, properties)
     for property, value in next, properties do
         inst[property] = value
     end
-    if self.fontOverride and (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) then
-        inst.Font = self.font
+    if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+        self.originalFonts[inst] = inst.Font
+        if self.fontOverride then
+            inst.Font = self.font
+        end
     end
     return inst
 end
@@ -192,6 +293,7 @@ end
 
 function library:RegisterThemeObject(object, property, resolver)
     if not object or not property then return end
+    if self.liveAccentThemes ~= true then return end
 
     local item = {
         object = object,
@@ -208,6 +310,8 @@ function library:RegisterThemeObject(object, property, resolver)
 end
 
 function library:ApplyTheme()
+    if self.liveAccentThemes ~= true then return end
+
     for _, item in next, self.themeObjects do
         if item.object and item.object.Parent then
             pcall(function()
@@ -223,18 +327,33 @@ function library:SetTheme(theme)
     if accent then
         self.theme.Accent = accent
     end
+    local font = theme.Font or theme.font
+    if font then
+        if tostring(font) == "Default" then
+            self:ResetFont()
+        else
+            self:SetFont(tostring(font))
+        end
+    end
     self:ApplyTheme()
 end
 
 function library:GetTheme()
     return {
-        Accent = self.theme.Accent
+        Accent = self.theme.Accent,
+        Font = self.fontOverride and self.font.Name or "Default"
     }
 end
 
 function library:SetFont(font)
     if typeof(font) == "string" then
-        font = Enum.Font[font]
+        if font == "Default" then
+            return self:ResetFont()
+        end
+        local ok, enumFont = pcall(function()
+            return Enum.Font[font]
+        end)
+        font = ok and enumFont or nil
     end
     if typeof(font) ~= "EnumItem" or font.EnumType ~= Enum.Font then
         return false
@@ -245,6 +364,7 @@ function library:SetFont(font)
     if self.base then
         for _, object in next, self.base:GetDescendants() do
             if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                self.originalFonts[object] = self.originalFonts[object] or object.Font
                 object.Font = font
             end
         end
@@ -253,42 +373,131 @@ function library:SetFont(font)
     return true
 end
 
+function library:ResetFont()
+    self.fontOverride = false
+    self.font = Enum.Font.Gotham
+    if self.base then
+        for _, object in next, self.base:GetDescendants() do
+            if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox")) and self.originalFonts[object] then
+                object.Font = self.originalFonts[object]
+            end
+        end
+    end
+    return true
+end
+
 function library:ResetTheme()
     self:SetTheme({
-        Accent = self.defaultTheme.Accent
+        Accent = self.defaultTheme.Accent,
+        Font = "Default"
     })
 end
 
-function library:SaveTheme()
+function library:SetCustomCursor(imageId)
+    self.customCursorId = normalizeCursorImage(imageId)
+    if self.cursorImage then
+        self.cursorImage.Image = self.customCursorId
+    end
+    self:SetCustomCursorEnabled(self.customCursorEnabled)
+    return self.customCursorId ~= ""
+end
+
+function library:SetCustomCursorEnabled(enabled)
+    self.customCursorEnabled = enabled == true
+
+    if self.cursor then
+        self.cursor.Visible = self.open and not self.customCursorEnabled
+    end
+    if self.cursorImage then
+        self.cursorImage.Visible = self.open and self.customCursorEnabled and self.customCursorId ~= ""
+    end
+
+    pcall(function()
+        inputService.MouseIconEnabled = not self.customCursorEnabled
+    end)
+
+    return true
+end
+
+function library:SaveTheme(name)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
 
     local encoded = encodeJson({
-        Accent = colorToTable(self.theme.Accent)
+        Accent = colorToTable(self.theme.Accent),
+        Font = self.fontOverride and self.font.Name or "Default"
     })
     if not encoded then
         return false, "failed to encode theme"
     end
 
-    writefile(THEME_FILE, encoded)
-    return true, THEME_FILE
+    local path = name and buildSavePath(THEME_FOLDER, name) or THEME_FILE
+    writefile(path, encoded)
+    return true, path
 end
 
-function library:LoadTheme()
+function library:LoadTheme(name)
     if not hasFileApi() then
         return false, "executor file APIs unavailable"
     end
-    if not isfile(THEME_FILE) then
+
+    local path = name and buildSavePath(THEME_FOLDER, name) or THEME_FILE
+    if not isfile(path) then
         return false, "theme file not found"
     end
 
-    local decoded = decodeJson(readfile(THEME_FILE))
+    local decoded = decodeJson(readfile(path))
     if type(decoded) ~= "table" then
         return false, "failed to decode theme"
     end
 
     self:SetTheme(decoded)
-    return true, THEME_FILE
+    return true, path
+end
+
+function library:GetThemeList()
+    local ok, err = ensureSaveFolders()
+    if not ok then return {}, err end
+    return listJsonFiles(THEME_FOLDER)
+end
+
+function library:DeleteTheme(name)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local path = buildSavePath(THEME_FOLDER, name)
+    local deleted, result = deleteSaveFile(path)
+    if deleted and self:GetDefaultTheme() == displaySaveName(name) then
+        self:ResetDefaultTheme()
+    end
+    return deleted, result
+end
+
+function library:SetDefaultTheme(name)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local path = buildSavePath(THEME_FOLDER, name)
+    if not isfile(path) then
+        return false, "theme file not found"
+    end
+    return writeMarker(THEME_DEFAULT_FILE, name)
+end
+
+function library:GetDefaultTheme()
+    return readMarker(THEME_DEFAULT_FILE)
+end
+
+function library:ResetDefaultTheme()
+    return clearMarker(THEME_DEFAULT_FILE)
+end
+
+function library:LoadDefaultTheme()
+    local name = self:GetDefaultTheme()
+    if not name then
+        return false, "default theme not set"
+    end
+    return self:LoadTheme(name)
 end
 
 function library:SaveConfig(name)
@@ -312,14 +521,15 @@ function library:SaveConfig(name)
     local encoded = encodeJson({
         flags = values,
         theme = {
-            Accent = colorToTable(self.theme.Accent)
+            Accent = colorToTable(self.theme.Accent),
+            Font = self.fontOverride and self.font.Name or "Default"
         }
     })
     if not encoded then
         return false, "failed to encode config"
     end
 
-    local path = CONFIG_FOLDER .. "/" .. sanitizeConfigName(name)
+    local path = buildSavePath(CONFIG_FOLDER, name)
     writefile(path, encoded)
     return true, path
 end
@@ -329,7 +539,7 @@ function library:LoadConfig(name)
         return false, "executor file APIs unavailable"
     end
 
-    local path = CONFIG_FOLDER .. "/" .. sanitizeConfigName(name)
+    local path = buildSavePath(CONFIG_FOLDER, name)
     if not isfile(path) then
         return false, "config file not found"
     end
@@ -370,6 +580,51 @@ function library:LoadConfig(name)
     return true, path
 end
 
+function library:GetConfigList()
+    local ok, err = ensureSaveFolders()
+    if not ok then return {}, err end
+    return listJsonFiles(CONFIG_FOLDER)
+end
+
+function library:DeleteConfig(name)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local path = buildSavePath(CONFIG_FOLDER, name)
+    local deleted, result = deleteSaveFile(path)
+    if deleted and self:GetAutoloadConfig() == displaySaveName(name) then
+        self:ResetAutoloadConfig()
+    end
+    return deleted, result
+end
+
+function library:SetAutoloadConfig(name)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local path = buildSavePath(CONFIG_FOLDER, name)
+    if not isfile(path) then
+        return false, "config file not found"
+    end
+    return writeMarker(CONFIG_AUTOLOAD_FILE, name)
+end
+
+function library:GetAutoloadConfig()
+    return readMarker(CONFIG_AUTOLOAD_FILE)
+end
+
+function library:ResetAutoloadConfig()
+    return clearMarker(CONFIG_AUTOLOAD_FILE)
+end
+
+function library:LoadAutoloadConfig()
+    local name = self:GetAutoloadConfig()
+    if not name then
+        return false, "autoload config not set"
+    end
+    return self:LoadConfig(name)
+end
+
 local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
     local size = subHolder and 34 or 40
     parentTable.main = library:Create("ImageButton", {
@@ -404,7 +659,8 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
     local title = library:Create("TextLabel", {
         Size = UDim2.new(1, 0, 0, size),
         BackgroundTransparency = subHolder and 0 or 1,
-        BackgroundColor3 = Color3.fromRGB(10, 10, 10),
+        BackgroundColor3 = subHolder and (parentTable.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10)) or
+        Color3.fromRGB(10, 10, 10),
         BorderSizePixel = 0,
         Text = holderTitle,
         TextSize = subHolder and 16 or 17,
@@ -413,12 +669,6 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Parent = parentTable.main
     })
     parentTable.topBar = title
-
-    if subHolder then
-        library:RegisterThemeObject(title, "BackgroundColor3", function(theme)
-            return parentTable.open and theme.Accent or Color3.fromRGB(10, 10, 10)
-        end)
-    end
 
     local closeHolder = library:Create("Frame", {
         Position = UDim2.new(1, 0, 0, 0),
@@ -473,6 +723,8 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
                 dragLastMouseX = dragStart.X
                 dragVelocityX = 0
                 dragRotationVelocity = 0
+                dragOriginalClips = dragObject.ClipsDescendants
+                dragObject.ClipsDescendants = false
             end
         end)
         title.InputEnded:connect(function(input)
@@ -490,7 +742,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
                 Color3.fromRGB(50, 50, 50) or Color3.fromRGB(30, 30, 30) }):Play()
             if subHolder then
                 tweenService:Create(title, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { BackgroundColor3 = parentTable.open and getAccent() or Color3.fromRGB(10, 10, 10) })
+                    { BackgroundColor3 = parentTable.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10) })
                     :Play()
             else
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -1257,6 +1509,17 @@ local function createList(option, parent, holder)
         if self.value == value then
             self:SetValue("")
         end
+    end
+
+    function option:ClearValues()
+        for _, label in next, content:GetChildren() do
+            if label:IsA "TextLabel" then
+                label:Destroy()
+            end
+        end
+        self.values = {}
+        valueCount = 0
+        self:SetValue("")
     end
 
     function option:SetValue(value)
@@ -2246,6 +2509,17 @@ function library:Init()
         Parent = self.base
     })
 
+    self.cursorImage = self.cursorImage or self:Create("ImageLabel", {
+        ZIndex = 101,
+        AnchorPoint = Vector2.new(0, 0),
+        Size = UDim2.new(0, 28, 0, 28),
+        BackgroundTransparency = 1,
+        Image = self.customCursorId,
+        Visible = false,
+        Parent = self.base
+    })
+    self:SetCustomCursorEnabled(self.customCursorEnabled)
+
     for _, window in next, self.windows do
         if window.canInit and not window.init then
             window.init = true
@@ -2255,6 +2529,11 @@ function library:Init()
     end
 
     playIntro(self.base, self.windows)
+
+    delay(0.15, function()
+        self:LoadDefaultTheme()
+        self:LoadAutoloadConfig()
+    end)
 end
 
 function library:Close()
@@ -2269,9 +2548,7 @@ function library:Close()
     local duration = 0.28
 
     if self.open then
-        if self.cursor then
-            self.cursor.Visible = true
-        end
+        self:SetCustomCursorEnabled(self.customCursorEnabled)
 
         local targets = self._fadeTargets or collectFadeTargets(self.base)
         setFadeTargetsHidden(targets)
@@ -2304,6 +2581,12 @@ function library:Close()
         if self.cursor then
             self.cursor.Visible = false
         end
+        if self.cursorImage then
+            self.cursorImage.Visible = false
+        end
+        pcall(function()
+            inputService.MouseIconEnabled = true
+        end)
 
         local targets = collectFadeTargets(self.base)
         self._fadeTargets = targets
@@ -2348,6 +2631,7 @@ function library:Destroy()
     dragLastMouseX = nil
     dragVelocityX = 0
     dragRotationVelocity = 0
+    dragOriginalClips = nil
 
     if self.activePopup then
         pcall(function()
@@ -2367,7 +2651,12 @@ function library:Destroy()
 
     self.base = nil
     self.cursor = nil
+    self.cursorImage = nil
     self._fadeTargets = nil
+
+    pcall(function()
+        inputService.MouseIconEnabled = true
+    end)
 
     for _, window in next, self.windows do
         window.main = nil
@@ -2384,6 +2673,12 @@ function library:Unload()
     if self.cursor then
         self.cursor.Visible = false
     end
+    if self.cursorImage then
+        self.cursorImage.Visible = false
+    end
+    pcall(function()
+        inputService.MouseIconEnabled = true
+    end)
 
     if self.activePopup then
         pcall(function()
@@ -2439,9 +2734,14 @@ inputService.InputEnded:connect(function(input)
 end)
 
 inputService.InputChanged:connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement and library.cursor then
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
         local mouse = inputService:GetMouseLocation() + Vector2.new(0, -36)
-        library.cursor.Position = UDim2.new(0, mouse.X - 2, 0, mouse.Y - 2)
+        if library.cursor then
+            library.cursor.Position = UDim2.new(0, mouse.X - 2, 0, mouse.Y - 2)
+        end
+        if library.cursorImage then
+            library.cursorImage.Position = UDim2.new(0, mouse.X - 14, 0, mouse.Y - 14)
+        end
     end
 end)
 
@@ -2456,7 +2756,7 @@ runService.RenderStepped:connect(function(dt)
         dragObject.Position = dragObject.Position:Lerp(dragTarget, DRAG_LERP_SPEED)
     end
 
-    local targetRotation = dragging and math.clamp((dragVelocityX or 0) * 0.012, -8, 8) or 0
+    local targetRotation = dragging and math.clamp((dragVelocityX or 0) * DRAG_TILT_MULTIPLIER, -MAX_DRAG_ROTATION, MAX_DRAG_ROTATION) or 0
     local stiffness = library.STIFFNESS or STIFFNESS
     local damping = library.DAMPING or DAMPING
     local displacement = dragObject.Rotation - targetRotation
@@ -2467,6 +2767,9 @@ runService.RenderStepped:connect(function(dt)
 
     if not dragging and math.abs(dragObject.Rotation) < 0.05 and math.abs(dragRotationVelocity or 0) < 0.05 then
         dragObject.Rotation = 0
+        if dragOriginalClips ~= nil then
+            dragObject.ClipsDescendants = dragOriginalClips
+        end
         dragObject = nil
         dragTarget = nil
         dragStart = nil
@@ -2474,6 +2777,7 @@ runService.RenderStepped:connect(function(dt)
         dragLastMouseX = nil
         dragVelocityX = 0
         dragRotationVelocity = 0
+        dragOriginalClips = nil
     end
 end)
 
