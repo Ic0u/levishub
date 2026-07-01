@@ -1,23 +1,19 @@
 -- ============================================================
 --  Levis Hub - Universal UI Test
---  Runs on unsupported games and documents the UI library.
+--  Minimal demo with separate manager windows.
 -- ============================================================
 
 local UILIB_URL = "https://raw.githubusercontent.com/Ic0u/levishub/main/libraries/UILibrary.lua"
 local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 
-local Window = Library:CreateWindow("Levis Hub")
-local Folder = Window:AddFolder("Elements")
-local Runtime = Window:AddFolder("Runtime")
-local Cursor = Window:AddFolder("Cursor")
-local ThemeManager = Window:AddFolder("Theme Manager")
-local Configuration = Window:AddFolder("Configuration")
+local MainWindow = Library:CreateWindow("Levis Hub")
+local ThemeManager = Library:CreateWindow("Theme Manager")
+local Configuration = Library:CreateWindow("Configuration")
+local CursorWindow = Library:CreateWindow("Cursor")
 
-Window:AddLabel({ text = "Universal UI test" })
-Window:AddDivider()
-
-local statusLabel = Window:AddLabel({ text = "Status: ready" })
-Window:AddLabel({ text = "RightShift toggles the UI" })
+local statusLabel = MainWindow:AddLabel({ text = "Status: ready" })
+MainWindow:AddDivider()
+MainWindow:AddLabel({ text = "RightShift toggles the UI" })
 
 local function cleanName(value, fallback)
     value = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -39,45 +35,19 @@ local function setStatus(ok, success, failure)
     statusLabel:Set(ok and ("Status: " .. success) or ("Status: " .. tostring(failure)))
 end
 
-local demoToggle = Window:AddToggle({
+local refreshThemeList = function() end
+local refreshConfigList = function() end
+
+MainWindow:AddToggle({
     text = "Toggle",
     flag = "demo_toggle",
     state = false,
     callback = function(enabled)
         statusLabel:Set("Status: toggle " .. (enabled and "on" or "off"))
-        print("[Levis Hub] Toggle:", enabled)
     end
 })
 
-Window:AddButton({
-    text = "Button",
-    flag = "demo_button",
-    callback = function()
-        statusLabel:Set("Status: button pressed")
-        print("[Levis Hub] Button pressed")
-    end
-})
-
-local demoList = Folder:AddList({
-    text = "List",
-    flag = "demo_list",
-    value = "Default",
-    values = { "Default", "Fast", "Clean" },
-    callback = function(value)
-        print("[Levis Hub] List:", value)
-    end
-})
-
-local demoBox = Folder:AddBox({
-    text = "Box",
-    flag = "demo_box",
-    value = "Levis",
-    callback = function(value, enterPressed)
-        print("[Levis Hub] Box:", value, enterPressed)
-    end
-})
-
-local demoSlider = Folder:AddSlider({
+MainWindow:AddSlider({
     text = "Slider",
     flag = "demo_slider",
     value = 50,
@@ -89,7 +59,26 @@ local demoSlider = Folder:AddSlider({
     end
 })
 
-local demoColor = Folder:AddColor({
+MainWindow:AddList({
+    text = "Mode",
+    flag = "demo_mode",
+    value = "Default",
+    values = { "Default", "Fast", "Clean" },
+    callback = function(value)
+        print("[Levis Hub] Mode:", value)
+    end
+})
+
+MainWindow:AddBox({
+    text = "Text",
+    flag = "demo_text",
+    value = "Levis",
+    callback = function(value)
+        print("[Levis Hub] Text:", value)
+    end
+})
+
+MainWindow:AddColor({
     text = "Color",
     flag = "demo_color",
     color = Color3.fromRGB(0, 255, 111),
@@ -98,7 +87,7 @@ local demoColor = Folder:AddColor({
     end
 })
 
-local toggleBind = Folder:AddBind({
+MainWindow:AddBind({
     text = "Toggle UI",
     flag = "toggle_ui",
     key = "RightShift",
@@ -107,9 +96,16 @@ local toggleBind = Folder:AddBind({
     end
 })
 
+MainWindow:AddButton({
+    text = "Unload UI",
+    callback = function()
+        Library:Unload()
+    end
+})
+
 local cursorId = ""
 
-Cursor:AddBox({
+CursorWindow:AddBox({
     text = "Custom cursor id",
     flag = "custom_cursor_id",
     value = "",
@@ -121,7 +117,7 @@ Cursor:AddBox({
     end
 })
 
-Cursor:AddToggle({
+CursorWindow:AddToggle({
     text = "Custom cursor",
     flag = "custom_cursor",
     state = false,
@@ -134,7 +130,7 @@ Cursor:AddToggle({
     end
 })
 
-Cursor:AddButton({
+CursorWindow:AddButton({
     text = "Apply cursor id",
     callback = function()
         local ok = Library:SetCustomCursor(cursorId)
@@ -144,10 +140,6 @@ Cursor:AddButton({
 
 local themeName = "default"
 local selectedTheme = "--"
-local configName = "default"
-local selectedConfig = "--"
-local refreshThemeList = function() end
-local refreshConfigList = function() end
 
 local themeColor = ThemeManager:AddColor({
     text = "Accent",
@@ -204,7 +196,7 @@ local themeFont = ThemeManager:AddList({
 })
 
 ThemeManager:AddBox({
-    text = "Custom theme name",
+    text = "Theme name",
     flag = "theme_name",
     value = themeName,
     callback = function(value)
@@ -221,10 +213,10 @@ ThemeManager:AddButton({
     end
 })
 
-local themeDefaultLabel = ThemeManager:AddLabel({ text = "Current default theme: none" })
+local themeDefaultLabel = ThemeManager:AddLabel({ text = "Default theme: none" })
 
 local themeList = ThemeManager:AddList({
-    text = "Custom themes",
+    text = "Themes",
     flag = "theme_list",
     value = "--",
     values = { "--" },
@@ -234,13 +226,15 @@ local themeList = ThemeManager:AddList({
 })
 
 local function updateThemeDefaultLabel()
-    themeDefaultLabel:Set("Current default theme: " .. (Library:GetDefaultTheme() or "none"))
+    themeDefaultLabel:Set("Default theme: " .. (Library:GetDefaultTheme() or "none"))
 end
 
 refreshThemeList = function()
     if not themeList.ClearValues then return end
+
     local themes, err = Library:GetThemeList()
     themeList:ClearValues()
+
     if #themes == 0 then
         themeList:AddValue("--")
         themeList:SetValue("--")
@@ -252,6 +246,7 @@ refreshThemeList = function()
         themeList:SetValue(themes[1])
         selectedTheme = themes[1]
     end
+
     updateThemeDefaultLabel()
     if err then
         statusLabel:Set("Status: " .. err)
@@ -261,8 +256,7 @@ end
 ThemeManager:AddButton({
     text = "Load theme",
     callback = function()
-        local name = selectedName(selectedTheme, themeName, "default")
-        local ok, result = Library:LoadTheme(name)
+        local ok, result = Library:LoadTheme(selectedName(selectedTheme, themeName, "default"))
         if ok then
             themeColor:SetColor(Library:GetTheme().Accent)
             themeFont:SetValue(Library:GetTheme().Font or "Default")
@@ -274,8 +268,7 @@ ThemeManager:AddButton({
 ThemeManager:AddButton({
     text = "Overwrite theme",
     callback = function()
-        local name = selectedName(selectedTheme, themeName, "default")
-        local ok, result = Library:SaveTheme(name)
+        local ok, result = Library:SaveTheme(selectedName(selectedTheme, themeName, "default"))
         setStatus(ok, "theme overwritten", result)
         refreshThemeList()
     end
@@ -326,65 +319,8 @@ ThemeManager:AddButton({
     end
 })
 
-Runtime:AddButton({
-    text = "Set Toggle On",
-    callback = function()
-        demoToggle:SetState(true)
-    end
-})
-
-Runtime:AddButton({
-    text = "Set Slider 75",
-    callback = function()
-        demoSlider:SetValue(75)
-    end
-})
-
-Runtime:AddButton({
-    text = "Set Box Text",
-    callback = function()
-        demoBox:SetValue("Updated", true)
-    end
-})
-
-Runtime:AddButton({
-    text = "Set Color Green",
-    callback = function()
-        demoColor:SetColor(Color3.fromRGB(0, 255, 111))
-    end
-})
-
-Runtime:AddButton({
-    text = "Add List Value",
-    callback = function()
-        if not table.find(demoList.values, "Added") then
-            demoList:AddValue("Added")
-        end
-        demoList:SetValue("Added")
-    end
-})
-
-Runtime:AddButton({
-    text = "Remove List Value",
-    callback = function()
-        demoList:RemoveValue("Added")
-    end
-})
-
-Runtime:AddButton({
-    text = "Rename Window",
-    callback = function()
-        Window:SetTitle("Levis Hub - Testing")
-    end
-})
-
-Runtime:AddButton({
-    text = "Set Bind E",
-    callback = function()
-        toggleBind:SetKey("E")
-        statusLabel:Set("Status: UI toggle bind set to E")
-    end
-})
+local configName = "default"
+local selectedConfig = "--"
 
 Configuration:AddBox({
     text = "Config name",
@@ -404,10 +340,10 @@ Configuration:AddButton({
     end
 })
 
-local autoloadLabel = Configuration:AddLabel({ text = "Current autoload config: none" })
+local autoloadLabel = Configuration:AddLabel({ text = "Autoload config: none" })
 
 local configList = Configuration:AddList({
-    text = "Config list",
+    text = "Configs",
     flag = "config_list",
     value = "--",
     values = { "--" },
@@ -417,13 +353,15 @@ local configList = Configuration:AddList({
 })
 
 local function updateAutoloadLabel()
-    autoloadLabel:Set("Current autoload config: " .. (Library:GetAutoloadConfig() or "none"))
+    autoloadLabel:Set("Autoload config: " .. (Library:GetAutoloadConfig() or "none"))
 end
 
 refreshConfigList = function()
     if not configList.ClearValues then return end
+
     local configs, err = Library:GetConfigList()
     configList:ClearValues()
+
     if #configs == 0 then
         configList:AddValue("--")
         configList:SetValue("--")
@@ -435,6 +373,7 @@ refreshConfigList = function()
         configList:SetValue(configs[1])
         selectedConfig = configs[1]
     end
+
     updateAutoloadLabel()
     if err then
         statusLabel:Set("Status: " .. err)
@@ -495,13 +434,6 @@ Configuration:AddButton({
         local ok, result = Library:ResetAutoloadConfig()
         setStatus(ok, "autoload config reset", result)
         updateAutoloadLabel()
-    end
-})
-
-Configuration:AddButton({
-    text = "Unload UI",
-    callback = function()
-        Library:Unload()
     end
 })
 
