@@ -179,8 +179,10 @@ end
 local function ensureSaveFolders()
     local ok, err = ensureFolder(ROOT_FOLDER)
     if not ok then return false, err end
-    ensureFolder(THEME_FOLDER)
-    ensureFolder(CONFIG_FOLDER)
+    ok, err = ensureFolder(THEME_FOLDER)
+    if not ok then return false, err end
+    ok, err = ensureFolder(CONFIG_FOLDER)
+    if not ok then return false, err end
     return true
 end
 
@@ -429,13 +431,16 @@ end
 function library:ApplyTheme()
     if self.liveAccentThemes ~= true then return end
 
+    local alive = {}
     for _, item in next, self.themeObjects do
         if item.object and item.object.Parent then
+            table.insert(alive, item)
             pcall(function()
                 item.object[item.property] = item.resolver(self.theme)
             end)
         end
     end
+    self.themeObjects = alive
 end
 
 function library:SetTheme(theme)
@@ -521,16 +526,17 @@ end
 
 function library:SetCustomCursorEnabled(enabled)
     self.customCursorEnabled = enabled == true
+    local showCustomCursor = self.customCursorEnabled and self.customCursorId ~= ""
 
     if self.cursor then
-        self.cursor.Visible = self.open and not self.customCursorEnabled
+        self.cursor.Visible = self.open and not showCustomCursor
     end
     if self.cursorImage then
-        self.cursorImage.Visible = self.open and self.customCursorEnabled and self.customCursorId ~= ""
+        self.cursorImage.Visible = self.open and showCustomCursor
     end
 
     pcall(function()
-        inputService.MouseIconEnabled = not self.customCursorEnabled
+        inputService.MouseIconEnabled = not showCustomCursor
     end)
 
     return true
@@ -2817,6 +2823,8 @@ function library:Destroy()
     self.cursor = nil
     self.cursorImage = nil
     self._fadeTargets = nil
+    self.themeObjects = {}
+    self.originalFonts = {}
 
     pcall(function()
         inputService.MouseIconEnabled = true
