@@ -2695,7 +2695,9 @@ function library:Close()
         self.activePopup:Close()
     end
 
-    local duration = 0.28
+    local duration = 0.36
+    local slideDistance = 54
+    local maxStagger = 0.1
 
     if self.open then
         self:SetCustomCursorEnabled(self.customCursorEnabled)
@@ -2703,27 +2705,30 @@ function library:Close()
         local targets = self._fadeTargets or collectFadeTargets(self.base)
         setFadeTargetsHidden(targets)
 
-        for _, window in next, self.windows do
+        for index, window in next, self.windows do
             if window.main then
                 local position = window._visiblePosition or window.main.Position
                 local scale = ensureWindowScale(window)
+                local order = window.position or index
+                local stagger = math.min(order * 0.018, maxStagger)
 
                 window.main.Visible = true
-                window.main.Position = offsetUDim2(position, 0, 12)
-                scale.Scale = 0.97
+                window.main.Position = offsetUDim2(position, 0, -slideDistance)
+                window.main.Rotation = 0
+                scale.Scale = 0.985
 
-                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, stagger), {
                     Position = position
                 }):Play()
-                tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                tweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, stagger), {
                     Scale = 1
                 }):Play()
             end
         end
 
-        tweenFadeTargets(targets, false, duration)
+        tweenFadeTargets(targets, false, 0.24)
 
-        delay(duration, function()
+        delay(duration + maxStagger, function()
             self:ApplyTheme()
             self.isAnimating = false
         end)
@@ -2741,23 +2746,27 @@ function library:Close()
         local targets = collectFadeTargets(self.base)
         self._fadeTargets = targets
 
-        for _, window in next, self.windows do
+        for index, window in next, self.windows do
             if window.main then
                 local scale = ensureWindowScale(window)
+                local order = window.position or index
+                local stagger = math.min(order * 0.014, maxStagger)
 
                 window._visiblePosition = window.main.Position
-                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-                    Position = offsetUDim2(window.main.Position, 0, 12)
+                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, stagger), {
+                    Position = offsetUDim2(window.main.Position, 0, -slideDistance)
                 }):Play()
-                tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-                    Scale = 0.97
+                tweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, stagger), {
+                    Scale = 0.985
                 }):Play()
             end
         end
 
-        tweenFadeTargets(targets, true, duration)
+        delay(0.04, function()
+            tweenFadeTargets(targets, true, 0.22)
+        end)
 
-        delay(duration, function()
+        delay(duration + maxStagger, function()
             for _, window in next, self.windows do
                 if window.main and not self.open then
                     window.main.Visible = false
