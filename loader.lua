@@ -1,7 +1,7 @@
 -- ============================================================
 --  Levis Hub Loader
 --  Author  : Nam Nguyen
---  GitHub  : https://github.com/YOUR_USERNAME/LevisHub
+--  GitHub  : https://github.com/Ic0u/levishub
 -- ============================================================
 
 -- ── Anti Double-Execution Guard ──────────────────────────────
@@ -14,7 +14,7 @@ local Players       = game:GetService("Players")
 local HttpService   = game:GetService("HttpService")
 
 -- ── Config ────────────────────────────────────────────────────
-local BASE_URL        = "https://raw.githubusercontent.com/YOUR_USERNAME/LevisHub/main/"
+local BASE_URL        = "https://raw.githubusercontent.com/Ic0u/levishub/main/"
 
 -- ── External Game Registry (fetched from GitHub) ──────────────
 local DEFAULT_GAMES = {
