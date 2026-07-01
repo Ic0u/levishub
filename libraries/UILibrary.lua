@@ -431,16 +431,19 @@ end
 function library:ApplyTheme()
     if self.liveAccentThemes ~= true then return end
 
-    local alive = {}
+    local aliveCount = 0
     for _, item in next, self.themeObjects do
         if item.object and item.object.Parent then
-            table.insert(alive, item)
+            aliveCount = aliveCount + 1
+            self.themeObjects[aliveCount] = item
             pcall(function()
                 item.object[item.property] = item.resolver(self.theme)
             end)
         end
     end
-    self.themeObjects = alive
+    for index = aliveCount + 1, #self.themeObjects do
+        self.themeObjects[index] = nil
+    end
 end
 
 function library:SetTheme(theme)
@@ -2524,24 +2527,30 @@ local function collectFadeTargets(root)
 
     local function add(object)
         local props = {}
+        local hidden = {}
 
         if object:IsA("GuiObject") then
             props.BackgroundTransparency = object.BackgroundTransparency
+            hidden.BackgroundTransparency = 1
         end
         if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
             props.TextTransparency = object.TextTransparency
+            hidden.TextTransparency = 1
         end
         if object:IsA("ImageLabel") or object:IsA("ImageButton") then
             props.ImageTransparency = object.ImageTransparency
+            hidden.ImageTransparency = 1
         end
         if object:IsA("ScrollingFrame") then
             props.ScrollBarImageTransparency = object.ScrollBarImageTransparency
+            hidden.ScrollBarImageTransparency = 1
         end
 
         if next(props) then
             table.insert(targets, {
                 object = object,
-                props = props
+                props = props,
+                hidden = hidden
             })
         end
     end
@@ -2554,19 +2563,10 @@ local function collectFadeTargets(root)
     return targets
 end
 
-local function hiddenPropsFor(props)
-    local hidden = {}
-    for property in next, props do
-        hidden[property] = 1
-    end
-    return hidden
-end
-
 local function setFadeTargetsHidden(targets)
     for _, item in next, targets do
         pcall(function()
-            local hidden = hiddenPropsFor(item.props)
-            for property, value in next, hidden do
+            for property, value in next, item.hidden do
                 item.object[property] = value
             end
         end)
@@ -2577,7 +2577,7 @@ local function tweenFadeTargets(targets, hidden, duration)
     local info = TweenInfo.new(duration or 0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
     for _, item in next, targets do
         pcall(function()
-            tweenService:Create(item.object, info, hidden and hiddenPropsFor(item.props) or item.props):Play()
+            tweenService:Create(item.object, info, hidden and item.hidden or item.props):Play()
         end)
     end
 end
