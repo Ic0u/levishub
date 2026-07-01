@@ -14,6 +14,7 @@ Window:AddLabel({ text = "Universal UI test" })
 Window:AddDivider()
 
 local statusLabel = Window:AddLabel({ text = "Status: ready" })
+Window:AddLabel({ text = "RightShift toggles the UI" })
 
 Window:AddButton({
     text = "Button",
@@ -139,6 +140,14 @@ Runtime:AddButton({
     text = "Set Bind E",
     callback = function()
         toggleBind:SetKey("E")
+        statusLabel:Set("Status: UI toggle bind set to E")
+    end
+})
+
+Runtime:AddButton({
+    text = "Unload UI",
+    callback = function()
+        Library:Unload()
     end
 })
 

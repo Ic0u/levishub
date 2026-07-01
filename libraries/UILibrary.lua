@@ -1795,6 +1795,7 @@ end
 
 local function playIntro(root, windows)
     local fadeTargets = collectFadeTargets(root)
+    local scaleTargets = {}
 
     for _, item in next, fadeTargets do
         local object = item.object
@@ -1815,15 +1816,29 @@ local function playIntro(root, windows)
     for _, window in next, windows do
         if window.main then
             local position = window.main.Position
-            window.main.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 10)
-            tweenService:Create(window.main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+            local scale = window.main:FindFirstChild("LevisIntroScale") or library:Create("UIScale", {
+                Name = "LevisIntroScale",
+                Parent = window.main
+            })
+
+            scale.Scale = 0.96
+            table.insert(scaleTargets, scale)
+
+            window.main.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 14)
+            tweenService:Create(window.main, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                 Position = position
             }):Play()
         end
     end
 
     for _, item in next, fadeTargets do
-        tweenService:Create(item.object, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
+        tweenService:Create(item.object, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
+    end
+
+    for _, scale in next, scaleTargets do
+        tweenService:Create(scale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Scale = 1
+        }):Play()
     end
 end
 
@@ -1863,7 +1878,9 @@ end
 
 function library:Close()
     self.open = not self.open
-    self.cursor.Visible = self.open
+    if self.cursor then
+        self.cursor.Visible = self.open
+    end
     if self.activePopup then
         self.activePopup:Close()
     end
@@ -1872,6 +1889,42 @@ function library:Close()
             window.main.Visible = self.open
         end
     end
+end
+
+function library:Destroy()
+    self.open = false
+    dragging = false
+    dragInput = nil
+    dragObject = nil
+
+    if self.activePopup then
+        pcall(function()
+            self.activePopup:Close()
+        end)
+        self.activePopup = nil
+    end
+
+    if self.base then
+        pcall(function()
+            self.base:ClearAllChildren()
+        end)
+        pcall(function()
+            self.base:Destroy()
+        end)
+    end
+
+    self.base = nil
+    self.cursor = nil
+
+    for _, window in next, self.windows do
+        window.main = nil
+        window.content = nil
+        window.init = false
+    end
+end
+
+function library:Unload()
+    self:Destroy()
 end
 
 inputService.InputBegan:connect(function(input)
