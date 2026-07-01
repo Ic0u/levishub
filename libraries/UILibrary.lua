@@ -212,6 +212,11 @@ local function createLabel(option, parent)
         Parent = parent.content
     })
 
+    function option:Set(value)
+        self.text = tostring(value)
+        main.Text = " " .. self.text
+    end
+
     setmetatable(option, {
         __newindex = function(t, i, v)
             if i == "Text" then
@@ -240,7 +245,7 @@ function createToggle(option, parent)
         SizeConstraint = Enum.SizeConstraint.RelativeYY,
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and Color3.fromRGB(255, 65, 65) or Color3.fromRGB(100, 100, 100),
+        ImageColor3 = option.state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(100, 100, 100),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -252,7 +257,7 @@ function createToggle(option, parent)
         Size = UDim2.new(1, -4, 1, -4),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and Color3.fromRGB(255, 65, 65) or Color3.fromRGB(20, 20, 20),
+        ImageColor3 = option.state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(20, 20, 20),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -306,10 +311,10 @@ function createToggle(option, parent)
         checkmarkHolder:TweenSize(option.state and UDim2.new(1, -8, 1, -8) or UDim2.new(0, 0, 1, -8), "Out", "Quad", 0.2,
             true)
         tweenService:Create(tickboxInner, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { ImageColor3 = state and Color3.fromRGB(255, 65, 65) or Color3.fromRGB(20, 20, 20) }):Play()
+            { ImageColor3 = state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(20, 20, 20) }):Play()
         if state then
             tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
         else
             if inContact then
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -368,7 +373,7 @@ function createButton(option, parent)
             library.flags[option.flag] = true
             clicking = true
             tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
             option.callback()
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
@@ -457,7 +462,7 @@ local function createBind(option, parent)
             binding = true
             bindinput.Text = "..."
             tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             inContact = false
@@ -622,9 +627,9 @@ local function createSlider(option, parent)
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
             tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
             sliding = true
             option:SetValue(option.min +
             ((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X) * (option.max - option.min))
@@ -1034,7 +1039,7 @@ local function createBox(option, parent)
     inputvalue.Focused:connect(function()
         focused = true
         tweenService:Create(outline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { ImageColor3 = Color3.fromRGB(255, 65, 65) }):Play()
+            { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
     end)
 
     inputvalue.FocusLost:connect(function(enter)
@@ -1599,7 +1604,7 @@ local function getFnctions(parent)
         option.position = #self.options
         table.insert(self.options, option)
 
-        return options
+        return option
     end
 
     function parent:AddToggle(option)
@@ -1752,6 +1757,76 @@ end
 
 local UIToggle
 local UnlockMouse
+
+local function collectFadeTargets(root)
+    local targets = {}
+
+    local function add(object)
+        local props = {}
+
+        if object:IsA("GuiObject") then
+            props.BackgroundTransparency = object.BackgroundTransparency
+        end
+        if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+            props.TextTransparency = object.TextTransparency
+        end
+        if object:IsA("ImageLabel") or object:IsA("ImageButton") then
+            props.ImageTransparency = object.ImageTransparency
+        end
+        if object:IsA("ScrollingFrame") then
+            props.ScrollBarImageTransparency = object.ScrollBarImageTransparency
+        end
+
+        if next(props) then
+            table.insert(targets, {
+                object = object,
+                props = props
+            })
+        end
+    end
+
+    add(root)
+    for _, object in next, root:GetDescendants() do
+        add(object)
+    end
+
+    return targets
+end
+
+local function playIntro(root, windows)
+    local fadeTargets = collectFadeTargets(root)
+
+    for _, item in next, fadeTargets do
+        local object = item.object
+        if item.props.BackgroundTransparency ~= nil then
+            object.BackgroundTransparency = 1
+        end
+        if item.props.TextTransparency ~= nil then
+            object.TextTransparency = 1
+        end
+        if item.props.ImageTransparency ~= nil then
+            object.ImageTransparency = 1
+        end
+        if item.props.ScrollBarImageTransparency ~= nil then
+            object.ScrollBarImageTransparency = 1
+        end
+    end
+
+    for _, window in next, windows do
+        if window.main then
+            local position = window.main.Position
+            window.main.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 10)
+            tweenService:Create(window.main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                Position = position
+            }):Play()
+        end
+    end
+
+    for _, item in next, fadeTargets do
+        tweenService:Create(item.object, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
+    end
+end
+
 function library:Init()
     self.base = self.base or self:Create("ScreenGui")
     if (syn and syn.protect_gui) then
@@ -1782,6 +1857,8 @@ function library:Init()
             loadOptions(window)
         end
     end
+
+    playIntro(self.base, self.windows)
 end
 
 function library:Close()
