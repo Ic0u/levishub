@@ -9,6 +9,8 @@ local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 local Window = Library:CreateWindow("Levis Hub")
 local Folder = Window:AddFolder("Elements")
 local Runtime = Window:AddFolder("Runtime")
+local ThemeManager = Window:AddFolder("Theme Manager")
+local Configuration = Window:AddFolder("Configuration")
 
 Window:AddLabel({ text = "Universal UI test" })
 Window:AddDivider()
@@ -72,6 +74,44 @@ local demoColor = Folder:AddColor({
     color = Color3.fromRGB(0, 255, 111),
     callback = function(color)
         print("[Levis Hub] Color:", color)
+    end
+})
+
+local themeColor = ThemeManager:AddColor({
+    text = "Accent",
+    flag = "theme_accent",
+    color = Library:GetTheme().Accent,
+    callback = function(color)
+        Library:SetTheme({ Accent = color })
+        statusLabel:Set("Status: theme updated")
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Save Theme",
+    callback = function()
+        local ok, result = Library:SaveTheme()
+        statusLabel:Set(ok and "Status: theme saved" or ("Status: " .. result))
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Load Theme",
+    callback = function()
+        local ok, result = Library:LoadTheme()
+        if ok then
+            themeColor:SetColor(Library:GetTheme().Accent)
+        end
+        statusLabel:Set(ok and "Status: theme loaded" or ("Status: " .. result))
+    end
+})
+
+ThemeManager:AddButton({
+    text = "Reset Theme",
+    callback = function()
+        Library:ResetTheme()
+        themeColor:SetColor(Library:GetTheme().Accent)
+        statusLabel:Set("Status: theme reset")
     end
 })
 
@@ -144,7 +184,26 @@ Runtime:AddButton({
     end
 })
 
-Runtime:AddButton({
+Configuration:AddButton({
+    text = "Save Config",
+    callback = function()
+        local ok, result = Library:SaveConfig("default")
+        statusLabel:Set(ok and "Status: config saved" or ("Status: " .. result))
+    end
+})
+
+Configuration:AddButton({
+    text = "Load Config",
+    callback = function()
+        local ok, result = Library:LoadConfig("default")
+        if ok then
+            themeColor:SetColor(Library:GetTheme().Accent)
+        end
+        statusLabel:Set(ok and "Status: config loaded" or ("Status: " .. result))
+    end
+})
+
+Configuration:AddButton({
     text = "Unload UI",
     callback = function()
         Library:Unload()

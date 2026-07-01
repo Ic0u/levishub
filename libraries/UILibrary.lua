@@ -1,13 +1,33 @@
-local library = { flags = {}, windows = {}, open = true }
+local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
+local library = {
+    flags = {},
+    windows = {},
+    options = {},
+    open = true,
+    isAnimating = false,
+    theme = {
+        Accent = DEFAULT_ACCENT
+    },
+    defaultTheme = {
+        Accent = DEFAULT_ACCENT
+    },
+    themeObjects = {}
+}
 
 --Services
 local runService = game:GetService "RunService"
 local tweenService = game:GetService "TweenService"
 local textService = game:GetService "TextService"
 local inputService = game:GetService "UserInputService"
+local httpService = game:GetService "HttpService"
 
 --Locals
-local dragging, dragInput, dragStart, startPos, dragObject
+local dragging, dragInput, dragStart, startPos, dragObject, dragLastTarget
+
+local ROOT_FOLDER = "Levis Hub"
+local THEME_FOLDER = ROOT_FOLDER .. "/Theme"
+local CONFIG_FOLDER = ROOT_FOLDER .. "/Configuration"
+local THEME_FILE = THEME_FOLDER .. "/theme.json"
 
 local blacklistedKeys = { --add or remove keys if you find the need to
     Enum.KeyCode.Unknown, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Slash, Enum
@@ -31,11 +51,108 @@ local function keyCheck(x, x1)
     end
 end
 
+local function offsetUDim2(value, x, y)
+    return UDim2.new(value.X.Scale, value.X.Offset + x, value.Y.Scale, value.Y.Offset + y)
+end
+
+local function getAccent()
+    return library.theme.Accent or DEFAULT_ACCENT
+end
+
 local function update(input)
     local delta = input.Position - dragStart
     local yPos = (startPos.Y.Offset + delta.Y) < -36 and -36 or startPos.Y.Offset + delta.Y
-    dragObject:TweenPosition(UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, yPos), "Out",
-        "Quint", 0.1, true)
+    dragLastTarget = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, yPos)
+
+    tweenService:Create(dragObject, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position = dragLastTarget,
+        Rotation = math.clamp(delta.X / 60, -4, 4)
+    }):Play()
+end
+
+local function settleDrag(object)
+    if not object then return end
+    tweenService:Create(object, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = dragLastTarget or object.Position,
+        Rotation = 0
+    }):Play()
+end
+
+local function colorToTable(color)
+    return {
+        r = math.floor((color.R * 255) + 0.5),
+        g = math.floor((color.G * 255) + 0.5),
+        b = math.floor((color.B * 255) + 0.5)
+    }
+end
+
+local function tableToColor(value)
+    if typeof(value) == "Color3" then
+        return value
+    end
+    if type(value) == "table" then
+        local r = tonumber(value.r or value[1])
+        local g = tonumber(value.g or value[2])
+        local b = tonumber(value.b or value[3])
+        if r and g and b then
+            if r <= 1 and g <= 1 and b <= 1 then
+                return Color3.new(r, g, b)
+            end
+            return Color3.fromRGB(math.clamp(r, 0, 255), math.clamp(g, 0, 255), math.clamp(b, 0, 255))
+        end
+    end
+end
+
+local function hasFileApi()
+    return type(isfolder) == "function"
+        and type(makefolder) == "function"
+        and type(isfile) == "function"
+        and type(readfile) == "function"
+        and type(writefile) == "function"
+end
+
+local function ensureFolder(path)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    if not isfolder(path) then
+        makefolder(path)
+    end
+    return true
+end
+
+local function ensureSaveFolders()
+    local ok, err = ensureFolder(ROOT_FOLDER)
+    if not ok then return false, err end
+    ensureFolder(THEME_FOLDER)
+    ensureFolder(CONFIG_FOLDER)
+    return true
+end
+
+local function sanitizeConfigName(name)
+    name = tostring(name or "default")
+    name = name:gsub("[^%w%-%_ ]", "_")
+    if name == "" then
+        name = "default"
+    end
+    if not name:match("%.json$") then
+        name = name .. ".json"
+    end
+    return name
+end
+
+local function encodeJson(data)
+    local ok, encoded = pcall(function()
+        return httpService:JSONEncode(data)
+    end)
+    return ok and encoded or nil
+end
+
+local function decodeJson(raw)
+    local ok, decoded = pcall(function()
+        return httpService:JSONDecode(raw)
+    end)
+    return ok and decoded or nil
 end
 
 --From: https://devforum.roblox.com/t/how-to-create-a-simple-rainbow-effect-using-tweenService/221849/2
@@ -64,6 +181,165 @@ function library:Draw(class, properties)
         object[p] = v;
     end
     return object
+end
+
+function library:RegisterThemeObject(object, property, resolver)
+    if not object or not property then return end
+
+    local item = {
+        object = object,
+        property = property,
+        resolver = typeof(resolver) == "function" and resolver or function(theme)
+            return theme.Accent
+        end
+    }
+    table.insert(self.themeObjects, item)
+
+    pcall(function()
+        object[property] = item.resolver(self.theme)
+    end)
+end
+
+function library:ApplyTheme()
+    for _, item in next, self.themeObjects do
+        if item.object and item.object.Parent then
+            pcall(function()
+                item.object[item.property] = item.resolver(self.theme)
+            end)
+        end
+    end
+end
+
+function library:SetTheme(theme)
+    theme = typeof(theme) == "table" and theme or {}
+    local accent = tableToColor(theme.Accent or theme.accent)
+    if accent then
+        self.theme.Accent = accent
+    end
+    self:ApplyTheme()
+end
+
+function library:GetTheme()
+    return {
+        Accent = self.theme.Accent
+    }
+end
+
+function library:ResetTheme()
+    self:SetTheme({
+        Accent = self.defaultTheme.Accent
+    })
+end
+
+function library:SaveTheme()
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local encoded = encodeJson({
+        Accent = colorToTable(self.theme.Accent)
+    })
+    if not encoded then
+        return false, "failed to encode theme"
+    end
+
+    writefile(THEME_FILE, encoded)
+    return true, THEME_FILE
+end
+
+function library:LoadTheme()
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    if not isfile(THEME_FILE) then
+        return false, "theme file not found"
+    end
+
+    local decoded = decodeJson(readfile(THEME_FILE))
+    if type(decoded) ~= "table" then
+        return false, "failed to decode theme"
+    end
+
+    self:SetTheme(decoded)
+    return true, THEME_FILE
+end
+
+function library:SaveConfig(name)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    local values = {}
+    for flag, option in next, self.options do
+        if option.type ~= "button" then
+            local value = self.flags[flag]
+            if typeof(value) == "Color3" then
+                value = colorToTable(value)
+            end
+            values[flag] = {
+                type = option.type,
+                value = value
+            }
+        end
+    end
+
+    local encoded = encodeJson({
+        flags = values,
+        theme = {
+            Accent = colorToTable(self.theme.Accent)
+        }
+    })
+    if not encoded then
+        return false, "failed to encode config"
+    end
+
+    local path = CONFIG_FOLDER .. "/" .. sanitizeConfigName(name)
+    writefile(path, encoded)
+    return true, path
+end
+
+function library:LoadConfig(name)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+
+    local path = CONFIG_FOLDER .. "/" .. sanitizeConfigName(name)
+    if not isfile(path) then
+        return false, "config file not found"
+    end
+
+    local decoded = decodeJson(readfile(path))
+    if type(decoded) ~= "table" then
+        return false, "failed to decode config"
+    end
+
+    if type(decoded.theme) == "table" then
+        self:SetTheme(decoded.theme)
+    end
+
+    local flags = type(decoded.flags) == "table" and decoded.flags or {}
+    for flag, payload in next, flags do
+        local option = self.options[flag]
+        local value = type(payload) == "table" and payload.value or payload
+        if option then
+            if option.type == "toggle" and option.SetState then
+                option:SetState(value == true)
+            elseif option.type == "slider" and option.SetValue then
+                option:SetValue(tonumber(value) or option.value)
+            elseif option.type == "list" and option.SetValue then
+                option:SetValue(tostring(value or ""))
+            elseif option.type == "box" and option.SetValue then
+                option:SetValue(tostring(value or ""), true)
+            elseif option.type == "bind" and option.SetKey then
+                option:SetKey(tostring(value or option.key))
+            elseif option.type == "color" and option.SetColor then
+                local color = tableToColor(value)
+                if color then
+                    option:SetColor(color)
+                end
+            end
+        end
+    end
+
+    return true, path
 end
 
 local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
@@ -168,6 +444,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         title.InputEnded:connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = false
+                settleDrag(parentTable.main)
             end
         end)
     end
@@ -245,7 +522,7 @@ function createToggle(option, parent)
         SizeConstraint = Enum.SizeConstraint.RelativeYY,
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(100, 100, 100),
+        ImageColor3 = option.state and getAccent() or Color3.fromRGB(100, 100, 100),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -257,7 +534,7 @@ function createToggle(option, parent)
         Size = UDim2.new(1, -4, 1, -4),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(20, 20, 20),
+        ImageColor3 = option.state and getAccent() or Color3.fromRGB(20, 20, 20),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -282,6 +559,13 @@ function createToggle(option, parent)
     })
 
     local inContact
+    library:RegisterThemeObject(tickboxOutline, "ImageColor3", function(theme)
+        return option.state and theme.Accent or Color3.fromRGB(100, 100, 100)
+    end)
+    library:RegisterThemeObject(tickboxInner, "ImageColor3", function(theme)
+        return option.state and theme.Accent or Color3.fromRGB(20, 20, 20)
+    end)
+
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             option:SetState(not option.state)
@@ -311,10 +595,10 @@ function createToggle(option, parent)
         checkmarkHolder:TweenSize(option.state and UDim2.new(1, -8, 1, -8) or UDim2.new(0, 0, 1, -8), "Out", "Quad", 0.2,
             true)
         tweenService:Create(tickboxInner, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { ImageColor3 = state and Color3.fromRGB(0, 255, 111) or Color3.fromRGB(20, 20, 20) }):Play()
+            { ImageColor3 = state and getAccent() or Color3.fromRGB(20, 20, 20) }):Play()
         if state then
             tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+                { ImageColor3 = getAccent() }):Play()
         else
             if inContact then
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -368,12 +652,19 @@ function createButton(option, parent)
 
     local inContact
     local clicking
+    library:RegisterThemeObject(round, "ImageColor3", function(theme)
+        if clicking then
+            return theme.Accent
+        end
+        return inContact and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(40, 40, 40)
+    end)
+
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             library.flags[option.flag] = true
             clicking = true
             tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+                { ImageColor3 = getAccent() }):Play()
             option.callback()
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
@@ -447,6 +738,13 @@ local function createBind(option, parent)
     })
 
     local inContact
+    library:RegisterThemeObject(round, "ImageColor3", function(theme)
+        if binding then
+            return theme.Accent
+        end
+        return inContact and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(40, 40, 40)
+    end)
+
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             inContact = true
@@ -462,7 +760,7 @@ local function createBind(option, parent)
             binding = true
             bindinput.Text = "..."
             tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+                { ImageColor3 = getAccent() }):Play()
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             inContact = false
@@ -572,7 +870,7 @@ local function createSlider(option, parent)
     local fill = library:Create("ImageLabel", {
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = Color3.fromRGB(60, 60, 60),
+        ImageColor3 = getAccent(),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -624,12 +922,19 @@ local function createSlider(option, parent)
 
     local sliding
     local inContact
+    library:RegisterThemeObject(fill, "ImageColor3", function(theme)
+        return theme.Accent
+    end)
+    library:RegisterThemeObject(circle, "ImageColor3", function(theme)
+        return sliding and theme.Accent or Color3.fromRGB(60, 60, 60)
+    end)
+
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+                { ImageColor3 = getAccent() }):Play()
             tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = getAccent() }):Play()
             sliding = true
             option:SetValue(option.min +
             ((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X) * (option.max - option.min))
@@ -638,7 +943,7 @@ local function createSlider(option, parent)
             inContact = true
             if not sliding then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
+                    { ImageColor3 = getAccent() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(2.8, 0, 2.8, 0), ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
             end
@@ -657,12 +962,12 @@ local function createSlider(option, parent)
             sliding = false
             if inContact then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
+                    { ImageColor3 = getAccent() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(2.8, 0, 2.8, 0), ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
             else
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
+                    { ImageColor3 = getAccent() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(0, 0, 0, 0), ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
             end
@@ -672,7 +977,7 @@ local function createSlider(option, parent)
             inputvalue:ReleaseFocus()
             if not sliding then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
+                    { ImageColor3 = getAccent() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(0, 0, 0, 0), ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
             end
@@ -1013,6 +1318,10 @@ local function createBox(option, parent)
 
     local inContact
     local focused
+    library:RegisterThemeObject(outline, "ImageColor3", function(theme)
+        return focused and theme.Accent or Color3.fromRGB(60, 60, 60)
+    end)
+
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             if not focused then inputvalue:CaptureFocus() end
@@ -1039,7 +1348,7 @@ local function createBox(option, parent)
     inputvalue.Focused:connect(function()
         focused = true
         tweenService:Create(outline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { ImageColor3 = Color3.fromRGB(0, 255, 111) }):Play()
+            { ImageColor3 = getAccent() }):Play()
     end)
 
     inputvalue.FocusLost:connect(function(enter)
@@ -1616,6 +1925,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.state
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         return option
@@ -1643,6 +1953,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.key
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         return option
@@ -1663,6 +1974,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.value
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         if type(option.float) == 'number' then
@@ -1689,6 +2001,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.value
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         return option
@@ -1703,6 +2016,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.value
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         return option
@@ -1720,6 +2034,7 @@ local function getFnctions(parent)
         option.position = #self.options
         option.flag = option.flag or option.text
         library.flags[option.flag] = option.color
+        library.options[option.flag] = option
         table.insert(self.options, option)
 
         return option
@@ -1793,6 +2108,42 @@ local function collectFadeTargets(root)
     return targets
 end
 
+local function hiddenPropsFor(props)
+    local hidden = {}
+    for property in next, props do
+        hidden[property] = 1
+    end
+    return hidden
+end
+
+local function setFadeTargetsHidden(targets)
+    for _, item in next, targets do
+        pcall(function()
+            local hidden = hiddenPropsFor(item.props)
+            for property, value in next, hidden do
+                item.object[property] = value
+            end
+        end)
+    end
+end
+
+local function tweenFadeTargets(targets, hidden, duration)
+    local info = TweenInfo.new(duration or 0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+    for _, item in next, targets do
+        pcall(function()
+            tweenService:Create(item.object, info, hidden and hiddenPropsFor(item.props) or item.props):Play()
+        end)
+    end
+end
+
+local function ensureWindowScale(window)
+    if not window.main then return end
+    return window.main:FindFirstChild("LevisIntroScale") or library:Create("UIScale", {
+        Name = "LevisIntroScale",
+        Parent = window.main
+    })
+end
+
 local function playIntro(root, windows)
     local fadeTargets = collectFadeTargets(root)
     local scaleTargets = {}
@@ -1816,10 +2167,7 @@ local function playIntro(root, windows)
     for _, window in next, windows do
         if window.main then
             local position = window.main.Position
-            local scale = window.main:FindFirstChild("LevisIntroScale") or library:Create("UIScale", {
-                Name = "LevisIntroScale",
-                Parent = window.main
-            })
+            local scale = ensureWindowScale(window)
 
             scale.Scale = 0.96
             table.insert(scaleTargets, scale)
@@ -1877,22 +2225,88 @@ function library:Init()
 end
 
 function library:Close()
+    if self.isAnimating or not self.base then return false end
+    self.isAnimating = true
     self.open = not self.open
-    if self.cursor then
-        self.cursor.Visible = self.open
-    end
+
     if self.activePopup then
         self.activePopup:Close()
     end
-    for _, window in next, self.windows do
-        if window.main then
-            window.main.Visible = self.open
+
+    local duration = 0.28
+
+    if self.open then
+        if self.cursor then
+            self.cursor.Visible = true
         end
+
+        local targets = self._fadeTargets or collectFadeTargets(self.base)
+        setFadeTargetsHidden(targets)
+
+        for _, window in next, self.windows do
+            if window.main then
+                local position = window._visiblePosition or window.main.Position
+                local scale = ensureWindowScale(window)
+
+                window.main.Visible = true
+                window.main.Position = offsetUDim2(position, 0, 12)
+                scale.Scale = 0.97
+
+                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Position = position
+                }):Play()
+                tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                    Scale = 1
+                }):Play()
+            end
+        end
+
+        tweenFadeTargets(targets, false, duration)
+
+        delay(duration, function()
+            self:ApplyTheme()
+            self.isAnimating = false
+        end)
+    else
+        if self.cursor then
+            self.cursor.Visible = false
+        end
+
+        local targets = collectFadeTargets(self.base)
+        self._fadeTargets = targets
+
+        for _, window in next, self.windows do
+            if window.main then
+                local scale = ensureWindowScale(window)
+
+                window._visiblePosition = window.main.Position
+                tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Position = offsetUDim2(window.main.Position, 0, 12)
+                }):Play()
+                tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Scale = 0.97
+                }):Play()
+            end
+        end
+
+        tweenFadeTargets(targets, true, duration)
+
+        delay(duration, function()
+            for _, window in next, self.windows do
+                if window.main and not self.open then
+                    window.main.Visible = false
+                end
+            end
+            self.isAnimating = false
+        end)
     end
+
+    return true
 end
 
 function library:Destroy()
     self.open = false
+    self.isAnimating = false
     dragging = false
     dragInput = nil
     dragObject = nil
@@ -1915,6 +2329,7 @@ function library:Destroy()
 
     self.base = nil
     self.cursor = nil
+    self._fadeTargets = nil
 
     for _, window in next, self.windows do
         window.main = nil
@@ -1924,7 +2339,44 @@ function library:Destroy()
 end
 
 function library:Unload()
-    self:Destroy()
+    if self.isAnimating or not self.base then return false end
+    self.isAnimating = true
+    self.open = false
+
+    if self.cursor then
+        self.cursor.Visible = false
+    end
+
+    if self.activePopup then
+        pcall(function()
+            self.activePopup:Close()
+        end)
+        self.activePopup = nil
+    end
+
+    local duration = 0.36
+    local targets = collectFadeTargets(self.base)
+
+    for _, window in next, self.windows do
+        if window.main then
+            local scale = ensureWindowScale(window)
+            tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+                Position = offsetUDim2(window.main.Position, 0, 22),
+                Rotation = window.main.Rotation + 2
+            }):Play()
+            tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+                Scale = 0.92
+            }):Play()
+        end
+    end
+
+    tweenFadeTargets(targets, true, duration)
+
+    delay(duration, function()
+        self:Destroy()
+    end)
+
+    return true
 end
 
 inputService.InputBegan:connect(function(input)
