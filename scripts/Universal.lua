@@ -87,6 +87,33 @@ local themeColor = ThemeManager:AddColor({
     end
 })
 
+ThemeManager:AddList({
+    text = "Font",
+    flag = "ui_font",
+    value = "Gotham",
+    values = {
+        "Gotham",
+        "GothamBold",
+        "SourceSans",
+        "SourceSansBold",
+        "Arial",
+        "ArialBold",
+        "Code",
+        "SciFi",
+        "Fantasy",
+        "Arcade",
+        "Cartoon",
+        "Ubuntu"
+    },
+    callback = function(fontName)
+        if Library:SetFont(fontName) then
+            statusLabel:Set("Status: font set to " .. fontName)
+        else
+            statusLabel:Set("Status: invalid font")
+        end
+    end
+})
+
 ThemeManager:AddButton({
     text = "Save Theme",
     callback = function()

@@ -1,3 +1,6 @@
+local STIFFNESS = 180
+local DAMPING = 12
+local DRAG_LERP_SPEED = 0.2
 local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
 local library = {
     flags = {},
@@ -5,6 +8,10 @@ local library = {
     options = {},
     open = true,
     isAnimating = false,
+    STIFFNESS = STIFFNESS,
+    DAMPING = DAMPING,
+    font = Enum.Font.Gotham,
+    fontOverride = false,
     theme = {
         Accent = DEFAULT_ACCENT
     },
@@ -22,7 +29,7 @@ local inputService = game:GetService "UserInputService"
 local httpService = game:GetService "HttpService"
 
 --Locals
-local dragging, dragInput, dragStart, startPos, dragObject, dragLastTarget
+local dragging, dragStart, startPos, dragObject, dragTarget, dragLastMouseX, dragVelocityX, dragRotationVelocity
 
 local ROOT_FOLDER = "Levis Hub"
 local THEME_FOLDER = ROOT_FOLDER .. "/Theme"
@@ -59,23 +66,20 @@ local function getAccent()
     return library.theme.Accent or DEFAULT_ACCENT
 end
 
-local function update(input)
-    local delta = input.Position - dragStart
+local function updateDragTarget(dt)
+    if not dragObject or not dragStart or not startPos then return end
+
+    local mouse = inputService:GetMouseLocation()
+    local delta = mouse - dragStart
     local yPos = (startPos.Y.Offset + delta.Y) < -36 and -36 or startPos.Y.Offset + delta.Y
-    dragLastTarget = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, yPos)
+    dragTarget = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, yPos)
 
-    tweenService:Create(dragObject, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-        Position = dragLastTarget,
-        Rotation = math.clamp(delta.X / 60, -4, 4)
-    }):Play()
-end
-
-local function settleDrag(object)
-    if not object then return end
-    tweenService:Create(object, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Position = dragLastTarget or object.Position,
-        Rotation = 0
-    }):Play()
+    if dragLastMouseX then
+        dragVelocityX = (mouse.X - dragLastMouseX) / math.max(dt or 0, 1 / 240)
+    else
+        dragVelocityX = 0
+    end
+    dragLastMouseX = mouse.X
 end
 
 local function colorToTable(color)
@@ -170,6 +174,9 @@ function library:Create(class, properties)
     for property, value in next, properties do
         inst[property] = value
     end
+    if self.fontOverride and (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) then
+        inst.Font = self.font
+    end
     return inst
 end
 
@@ -223,6 +230,27 @@ function library:GetTheme()
     return {
         Accent = self.theme.Accent
     }
+end
+
+function library:SetFont(font)
+    if typeof(font) == "string" then
+        font = Enum.Font[font]
+    end
+    if typeof(font) ~= "EnumItem" or font.EnumType ~= Enum.Font then
+        return false
+    end
+
+    self.font = font
+    self.fontOverride = true
+    if self.base then
+        for _, object in next, self.base:GetDescendants() do
+            if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                object.Font = font
+            end
+        end
+    end
+
+    return true
 end
 
 function library:ResetTheme()
@@ -384,6 +412,13 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Parent = parentTable.main
     })
+    parentTable.topBar = title
+
+    if subHolder then
+        library:RegisterThemeObject(title, "BackgroundColor3", function(theme)
+            return parentTable.open and theme.Accent or Color3.fromRGB(10, 10, 10)
+        end)
+    end
 
     local closeHolder = library:Create("Frame", {
         Position = UDim2.new(1, 0, 0, 0),
@@ -432,19 +467,17 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragObject = parentTable.main
                 dragging = true
-                dragStart = input.Position
+                dragStart = inputService:GetMouseLocation()
                 startPos = dragObject.Position
-            end
-        end)
-        title.InputChanged:connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                dragInput = input
+                dragTarget = startPos
+                dragLastMouseX = dragStart.X
+                dragVelocityX = 0
+                dragRotationVelocity = 0
             end
         end)
         title.InputEnded:connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = false
-                settleDrag(parentTable.main)
             end
         end)
     end
@@ -457,7 +490,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
                 Color3.fromRGB(50, 50, 50) or Color3.fromRGB(30, 30, 30) }):Play()
             if subHolder then
                 tweenService:Create(title, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { BackgroundColor3 = parentTable.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10) })
+                    { BackgroundColor3 = parentTable.open and getAccent() or Color3.fromRGB(10, 10, 10) })
                     :Play()
             else
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -2308,8 +2341,13 @@ function library:Destroy()
     self.open = false
     self.isAnimating = false
     dragging = false
-    dragInput = nil
     dragObject = nil
+    dragTarget = nil
+    dragStart = nil
+    startPos = nil
+    dragLastMouseX = nil
+    dragVelocityX = 0
+    dragRotationVelocity = 0
 
     if self.activePopup then
         pcall(function()
@@ -2394,13 +2432,48 @@ inputService.InputBegan:connect(function(input)
     end
 end)
 
+inputService.InputEnded:connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
 inputService.InputChanged:connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement and library.cursor then
         local mouse = inputService:GetMouseLocation() + Vector2.new(0, -36)
         library.cursor.Position = UDim2.new(0, mouse.X - 2, 0, mouse.Y - 2)
     end
-    if input == dragInput and dragging then
-        update(input)
+end)
+
+runService.RenderStepped:connect(function(dt)
+    if not dragObject then return end
+
+    if dragging then
+        updateDragTarget(dt)
+    end
+
+    if dragTarget then
+        dragObject.Position = dragObject.Position:Lerp(dragTarget, DRAG_LERP_SPEED)
+    end
+
+    local targetRotation = dragging and math.clamp((dragVelocityX or 0) * 0.012, -8, 8) or 0
+    local stiffness = library.STIFFNESS or STIFFNESS
+    local damping = library.DAMPING or DAMPING
+    local displacement = dragObject.Rotation - targetRotation
+    local force = (-stiffness * displacement) - (damping * (dragRotationVelocity or 0))
+
+    dragRotationVelocity = (dragRotationVelocity or 0) + (force * dt)
+    dragObject.Rotation = dragObject.Rotation + (dragRotationVelocity * dt)
+
+    if not dragging and math.abs(dragObject.Rotation) < 0.05 and math.abs(dragRotationVelocity or 0) < 0.05 then
+        dragObject.Rotation = 0
+        dragObject = nil
+        dragTarget = nil
+        dragStart = nil
+        startPos = nil
+        dragLastMouseX = nil
+        dragVelocityX = 0
+        dragRotationVelocity = 0
     end
 end)
 
