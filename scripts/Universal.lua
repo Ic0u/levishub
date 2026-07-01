@@ -465,3 +465,10 @@ ConfigFiles:AddButton({
 Library:Init()
 refreshThemeList()
 refreshConfigList()
+
+delay(0.35, function()
+    themeColor:SetColor(Library:GetTheme().Accent)
+    themeFont:SetValue(Library:GetTheme().Font or "Default")
+    refreshThemeList(selectedTheme)
+    refreshConfigList(selectedConfig)
+end)

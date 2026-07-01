@@ -24,7 +24,7 @@ local library = {
         Accent = DEFAULT_ACCENT
     },
     themeObjects = {},
-    liveAccentThemes = false
+    liveAccentThemes = true
 }
 
 --Services
@@ -73,7 +73,7 @@ local function offsetUDim2(value, x, y)
 end
 
 local function getAccent()
-    return DEFAULT_ACCENT
+    return library.theme.Accent or DEFAULT_ACCENT
 end
 
 local function updateDragTarget(dt)
@@ -129,10 +129,51 @@ local function ensureFolder(path)
     if not hasFileApi() then
         return false, "executor file APIs unavailable"
     end
-    if not isfolder(path) then
-        makefolder(path)
+    local ok, exists = pcall(function()
+        return isfolder(path)
+    end)
+    if not ok then
+        return false, tostring(exists)
+    end
+    if not exists then
+        local made, err = pcall(function()
+            makefolder(path)
+        end)
+        if not made then
+            return false, tostring(err)
+        end
     end
     return true
+end
+
+local function safeIsFile(path)
+    if not hasFileApi() then
+        return false
+    end
+    local ok, exists = pcall(function()
+        return isfile(path)
+    end)
+    return ok and exists == true
+end
+
+local function safeReadFile(path)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    local ok, result = pcall(function()
+        return readfile(path)
+    end)
+    return ok, ok and result or tostring(result)
+end
+
+local function safeWriteFile(path, data)
+    if not hasFileApi() then
+        return false, "executor file APIs unavailable"
+    end
+    local ok, err = pcall(function()
+        writefile(path, data)
+    end)
+    return ok, ok and path or tostring(err)
 end
 
 local function ensureSaveFolders()
@@ -167,11 +208,16 @@ end
 
 local function readNameIndex(path)
     local values = {}
-    if not hasFileApi() or not isfile(path) then
+    if not safeIsFile(path) then
         return values
     end
 
-    for line in tostring(readfile(path) or ""):gmatch("[^\r\n]+") do
+    local ok, raw = safeReadFile(path)
+    if not ok then
+        return values
+    end
+
+    for line in tostring(raw or ""):gmatch("[^\r\n]+") do
         local name = displaySaveName(line:gsub("^%s+", ""):gsub("%s+$", ""))
         if name ~= "" and not table.find(values, name) then
             table.insert(values, name)
@@ -185,8 +231,7 @@ local function writeNameIndex(path, values)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
     table.sort(values)
-    writefile(path, table.concat(values, "\n"))
-    return true, path
+    return safeWriteFile(path, table.concat(values, "\n"))
 end
 
 local function trackSaveName(path, name)
@@ -219,11 +264,21 @@ local function listJsonFiles(folder, indexPath)
     if type(listfiles) ~= "function" then
         return values, #values == 0 and "executor listfiles API unavailable" or nil
     end
-    if not isfolder(folder) then
+    local folderOk, folderExists = pcall(function()
+        return isfolder(folder)
+    end)
+    if not folderOk or not folderExists then
         return values
     end
 
-    for _, path in next, listfiles(folder) do
+    local listed, files = pcall(function()
+        return listfiles(folder)
+    end)
+    if not listed then
+        return values, tostring(files)
+    end
+
+    for _, path in next, files do
         if tostring(path):lower():match("%.json$") then
             local name = displaySaveName(path)
             if not table.find(values, name) then
@@ -236,11 +291,16 @@ local function listJsonFiles(folder, indexPath)
 end
 
 local function readMarker(path)
-    if not hasFileApi() or not isfile(path) then
+    if not safeIsFile(path) then
         return nil
     end
 
-    local value = tostring(readfile(path) or "")
+    local ok, raw = safeReadFile(path)
+    if not ok then
+        return nil
+    end
+
+    local value = tostring(raw or "")
     value = value:gsub("^%s+", ""):gsub("%s+$", "")
     if value == "" then
         return nil
@@ -251,18 +311,22 @@ end
 local function writeMarker(path, value)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
-    writefile(path, displaySaveName(value))
-    return true, path
+    return safeWriteFile(path, displaySaveName(value))
 end
 
 local function clearMarker(path)
     if not hasFileApi() then
         return false, "executor file APIs unavailable"
     end
-    if type(delfile) == "function" and isfile(path) then
-        delfile(path)
+    if type(delfile) == "function" and safeIsFile(path) then
+        local ok, err = pcall(function()
+            delfile(path)
+        end)
+        if not ok then
+            return false, tostring(err)
+        end
     elseif type(writefile) == "function" then
-        writefile(path, "")
+        return safeWriteFile(path, "")
     end
     return true, path
 end
@@ -271,14 +335,16 @@ local function deleteSaveFile(path)
     if not hasFileApi() then
         return false, "executor file APIs unavailable"
     end
-    if not isfile(path) then
+    if not safeIsFile(path) then
         return false, "file not found"
     end
     if type(delfile) ~= "function" then
         return false, "executor delfile API unavailable"
     end
-    delfile(path)
-    return true, path
+    local ok, err = pcall(function()
+        delfile(path)
+    end)
+    return ok, ok and path or tostring(err)
 end
 
 local function normalizeCursorImage(imageId)
@@ -483,9 +549,12 @@ function library:SaveTheme(name)
     end
 
     local path = name and buildSavePath(THEME_FOLDER, name) or THEME_FILE
-    writefile(path, encoded)
+    local written, result = safeWriteFile(path, encoded)
+    if not written then
+        return false, result
+    end
     trackSaveName(THEME_INDEX_FILE, name or "theme")
-    return true, path
+    return true, result
 end
 
 function library:LoadTheme(name)
@@ -494,11 +563,16 @@ function library:LoadTheme(name)
     end
 
     local path = name and buildSavePath(THEME_FOLDER, name) or THEME_FILE
-    if not isfile(path) then
+    if not safeIsFile(path) then
         return false, "theme file not found"
     end
 
-    local decoded = decodeJson(readfile(path))
+    local read, raw = safeReadFile(path)
+    if not read then
+        return false, raw
+    end
+
+    local decoded = decodeJson(raw)
     if type(decoded) ~= "table" then
         return false, "failed to decode theme"
     end
@@ -533,7 +607,7 @@ function library:SetDefaultTheme(name)
     if not ok then return false, err end
 
     local path = buildSavePath(THEME_FOLDER, name)
-    if not isfile(path) then
+    if not safeIsFile(path) then
         return false, "theme file not found"
     end
     return writeMarker(THEME_DEFAULT_FILE, name)
@@ -585,9 +659,12 @@ function library:SaveConfig(name)
     end
 
     local path = buildSavePath(CONFIG_FOLDER, name)
-    writefile(path, encoded)
+    local written, result = safeWriteFile(path, encoded)
+    if not written then
+        return false, result
+    end
     trackSaveName(CONFIG_INDEX_FILE, name or "default")
-    return true, path
+    return true, result
 end
 
 function library:LoadConfig(name)
@@ -596,11 +673,16 @@ function library:LoadConfig(name)
     end
 
     local path = buildSavePath(CONFIG_FOLDER, name)
-    if not isfile(path) then
+    if not safeIsFile(path) then
         return false, "config file not found"
     end
 
-    local decoded = decodeJson(readfile(path))
+    local read, raw = safeReadFile(path)
+    if not read then
+        return false, raw
+    end
+
+    local decoded = decodeJson(raw)
     if type(decoded) ~= "table" then
         return false, "failed to decode config"
     end
@@ -662,7 +744,7 @@ function library:SetAutoloadConfig(name)
     if not ok then return false, err end
 
     local path = buildSavePath(CONFIG_FOLDER, name)
-    if not isfile(path) then
+    if not safeIsFile(path) then
         return false, "config file not found"
     end
     return writeMarker(CONFIG_AUTOLOAD_FILE, name)
@@ -2522,27 +2604,33 @@ local function playIntro(root, windows)
         end
     end
 
-    for _, window in next, windows do
+    for index, window in next, windows do
         if window.main then
             local position = window.main.Position
             local scale = ensureWindowScale(window)
+            local order = window.position or index
+            local direction = order % 2 == 0 and -1 or 1
+            local delayTime = math.min(order * 0.035, 0.18)
 
-            scale.Scale = 0.96
+            scale.Scale = 0.82
             table.insert(scaleTargets, scale)
 
-            window.main.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 14)
-            tweenService:Create(window.main, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-                Position = position
+            window.main.Position = offsetUDim2(position, direction * 20, 30)
+            window.main.Rotation = direction * -4
+            tweenService:Create(window.main, TweenInfo.new(0.56, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delayTime), {
+                Position = position,
+                Rotation = 0
             }):Play()
         end
     end
 
     for _, item in next, fadeTargets do
-        tweenService:Create(item.object, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
+        tweenService:Create(item.object, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
     end
 
-    for _, scale in next, scaleTargets do
-        tweenService:Create(scale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    for index, scale in next, scaleTargets do
+        local delayTime = math.min((index - 1) * 0.035, 0.18)
+        tweenService:Create(scale, TweenInfo.new(0.56, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delayTime), {
             Scale = 1
         }):Play()
     end
@@ -2749,23 +2837,61 @@ function library:Unload()
         self.activePopup = nil
     end
 
-    local duration = 0.36
+    local duration = 0.72
     local targets = collectFadeTargets(self.base)
 
-    for _, window in next, self.windows do
+    local flash = self:Create("Frame", {
+        ZIndex = 999,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = getAccent(),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = self.base
+    })
+    tweenService:Create(flash, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0.72
+    }):Play()
+    delay(0.08, function()
+        if flash and flash.Parent then
+            tweenService:Create(flash, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                BackgroundTransparency = 1
+            }):Play()
+        end
+    end)
+
+    for index, window in next, self.windows do
         if window.main then
             local scale = ensureWindowScale(window)
-            tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-                Position = offsetUDim2(window.main.Position, 0, 22),
-                Rotation = window.main.Rotation + 2
+            local order = window.position or index
+            local direction = order % 2 == 0 and -1 or 1
+            local stagger = math.min(order * 0.025, 0.14)
+            local startPosition = window.main.Position
+
+            window.main.ClipsDescendants = false
+            tweenService:Create(window.main, TweenInfo.new(0.13, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, stagger), {
+                Position = offsetUDim2(startPosition, direction * 10, -16),
+                Rotation = direction * -7
             }):Play()
-            tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-                Scale = 0.92
+            tweenService:Create(scale, TweenInfo.new(0.13, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, stagger), {
+                Scale = 1.08
             }):Play()
+            delay(0.11 + stagger, function()
+                if window.main and window.main.Parent then
+                    tweenService:Create(window.main, TweenInfo.new(0.46, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                        Position = offsetUDim2(startPosition, direction * 180, 128),
+                        Rotation = direction * 26
+                    }):Play()
+                    tweenService:Create(scale, TweenInfo.new(0.46, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                        Scale = 0.48
+                    }):Play()
+                end
+            end)
         end
     end
 
-    tweenFadeTargets(targets, true, duration)
+    delay(0.16, function()
+        tweenFadeTargets(targets, true, 0.38)
+    end)
 
     delay(duration, function()
         self:Destroy()
