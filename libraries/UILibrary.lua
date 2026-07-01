@@ -41,7 +41,9 @@ local ROOT_FOLDER = "Levis Hub"
 local THEME_FOLDER = ROOT_FOLDER .. "/Theme"
 local CONFIG_FOLDER = ROOT_FOLDER .. "/Configuration"
 local THEME_FILE = THEME_FOLDER .. "/theme.json"
+local THEME_INDEX_FILE = THEME_FOLDER .. "/themes.txt"
 local THEME_DEFAULT_FILE = THEME_FOLDER .. "/default.txt"
+local CONFIG_INDEX_FILE = CONFIG_FOLDER .. "/configs.txt"
 local CONFIG_AUTOLOAD_FILE = CONFIG_FOLDER .. "/autoload.txt"
 
 local blacklistedKeys = { --add or remove keys if you find the need to
@@ -163,21 +165,70 @@ local function buildSavePath(folder, name)
     return folder .. "/" .. sanitizeConfigName(name)
 end
 
-local function listJsonFiles(folder)
+local function readNameIndex(path)
+    local values = {}
+    if not hasFileApi() or not isfile(path) then
+        return values
+    end
+
+    for line in tostring(readfile(path) or ""):gmatch("[^\r\n]+") do
+        local name = displaySaveName(line:gsub("^%s+", ""):gsub("%s+$", ""))
+        if name ~= "" and not table.find(values, name) then
+            table.insert(values, name)
+        end
+    end
+    table.sort(values)
+    return values
+end
+
+local function writeNameIndex(path, values)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+    table.sort(values)
+    writefile(path, table.concat(values, "\n"))
+    return true, path
+end
+
+local function trackSaveName(path, name)
+    local values = readNameIndex(path)
+    name = displaySaveName(name)
+    if name ~= "" and not table.find(values, name) then
+        table.insert(values, name)
+    end
+    return writeNameIndex(path, values)
+end
+
+local function untrackSaveName(path, name)
+    local values = readNameIndex(path)
+    name = displaySaveName(name)
+    for index, value in next, values do
+        if value == name then
+            table.remove(values, index)
+            break
+        end
+    end
+    return writeNameIndex(path, values)
+end
+
+local function listJsonFiles(folder, indexPath)
     if not hasFileApi() then
         return {}, "executor file APIs unavailable"
     end
+    local values = indexPath and readNameIndex(indexPath) or {}
+
     if type(listfiles) ~= "function" then
-        return {}, "executor listfiles API unavailable"
+        return values, #values == 0 and "executor listfiles API unavailable" or nil
     end
     if not isfolder(folder) then
-        return {}
+        return values
     end
 
-    local values = {}
     for _, path in next, listfiles(folder) do
         if tostring(path):lower():match("%.json$") then
-            table.insert(values, displaySaveName(path))
+            local name = displaySaveName(path)
+            if not table.find(values, name) then
+                table.insert(values, name)
+            end
         end
     end
     table.sort(values)
@@ -433,6 +484,7 @@ function library:SaveTheme(name)
 
     local path = name and buildSavePath(THEME_FOLDER, name) or THEME_FILE
     writefile(path, encoded)
+    trackSaveName(THEME_INDEX_FILE, name or "theme")
     return true, path
 end
 
@@ -458,7 +510,7 @@ end
 function library:GetThemeList()
     local ok, err = ensureSaveFolders()
     if not ok then return {}, err end
-    return listJsonFiles(THEME_FOLDER)
+    return listJsonFiles(THEME_FOLDER, THEME_INDEX_FILE)
 end
 
 function library:DeleteTheme(name)
@@ -469,6 +521,9 @@ function library:DeleteTheme(name)
     local deleted, result = deleteSaveFile(path)
     if deleted and self:GetDefaultTheme() == displaySaveName(name) then
         self:ResetDefaultTheme()
+    end
+    if deleted then
+        untrackSaveName(THEME_INDEX_FILE, name)
     end
     return deleted, result
 end
@@ -506,7 +561,7 @@ function library:SaveConfig(name)
 
     local values = {}
     for flag, option in next, self.options do
-        if option.type ~= "button" then
+        if option.type ~= "button" and option.skipConfig ~= true then
             local value = self.flags[flag]
             if typeof(value) == "Color3" then
                 value = colorToTable(value)
@@ -531,6 +586,7 @@ function library:SaveConfig(name)
 
     local path = buildSavePath(CONFIG_FOLDER, name)
     writefile(path, encoded)
+    trackSaveName(CONFIG_INDEX_FILE, name or "default")
     return true, path
 end
 
@@ -557,7 +613,7 @@ function library:LoadConfig(name)
     for flag, payload in next, flags do
         local option = self.options[flag]
         local value = type(payload) == "table" and payload.value or payload
-        if option then
+        if option and option.skipConfig ~= true then
             if option.type == "toggle" and option.SetState then
                 option:SetState(value == true)
             elseif option.type == "slider" and option.SetValue then
@@ -583,7 +639,7 @@ end
 function library:GetConfigList()
     local ok, err = ensureSaveFolders()
     if not ok then return {}, err end
-    return listJsonFiles(CONFIG_FOLDER)
+    return listJsonFiles(CONFIG_FOLDER, CONFIG_INDEX_FILE)
 end
 
 function library:DeleteConfig(name)
@@ -594,6 +650,9 @@ function library:DeleteConfig(name)
     local deleted, result = deleteSaveFile(path)
     if deleted and self:GetAutoloadConfig() == displaySaveName(name) then
         self:ResetAutoloadConfig()
+    end
+    if deleted then
+        untrackSaveName(CONFIG_INDEX_FILE, name)
     end
     return deleted, result
 end
@@ -629,7 +688,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
     local size = subHolder and 34 or 40
     parentTable.main = library:Create("ImageButton", {
         LayoutOrder = subHolder and parentTable.position or 0,
-        Position = UDim2.new(0, 20 + (250 * (parentTable.position or 0)), 0, 20),
+        Position = parentTable.windowPosition or UDim2.new(0, 20 + (250 * (parentTable.position or 0)), 0, 20),
         Size = UDim2.new(0, 230, 0, size),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
@@ -2356,9 +2415,12 @@ local function getFnctions(parent)
     end
 end
 
-function library:CreateWindow(title)
+function library:CreateWindow(title, position)
     local window = { title = tostring(title), options = {}, open = true, canInit = true, init = false, position = #self
     .windows }
+    if typeof(position) == "UDim2" then
+        window.windowPosition = position
+    end
     getFnctions(window)
 
     table.insert(library.windows, window)

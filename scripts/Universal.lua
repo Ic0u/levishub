@@ -1,15 +1,17 @@
 -- ============================================================
 --  Levis Hub - Universal UI Test
---  Minimal demo with separate manager windows.
+--  Clean manager demo with separate windows.
 -- ============================================================
 
 local UILIB_URL = "https://raw.githubusercontent.com/Ic0u/levishub/main/libraries/UILibrary.lua"
 local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 
-local MainWindow = Library:CreateWindow("Levis Hub")
-local ThemeManager = Library:CreateWindow("Theme Manager")
-local Configuration = Library:CreateWindow("Configuration")
-local CursorWindow = Library:CreateWindow("Cursor")
+local MainWindow = Library:CreateWindow("Levis Hub", UDim2.new(0, 20, 0, 20))
+local ThemeEditor = Library:CreateWindow("Theme Editor", UDim2.new(0, 270, 0, 20))
+local ThemeFiles = Library:CreateWindow("Theme Files", UDim2.new(0, 520, 0, 20))
+local ConfigEditor = Library:CreateWindow("Config Editor", UDim2.new(0, 270, 0, 340))
+local ConfigFiles = Library:CreateWindow("Config Files", UDim2.new(0, 520, 0, 340))
+local CursorWindow = Library:CreateWindow("Cursor", UDim2.new(0, 20, 0, 360))
 
 local statusLabel = MainWindow:AddLabel({ text = "Status: ready" })
 MainWindow:AddDivider()
@@ -33,6 +35,20 @@ end
 
 local function setStatus(ok, success, failure)
     statusLabel:Set(ok and ("Status: " .. success) or ("Status: " .. tostring(failure)))
+end
+
+local function selectPreferred(list, values, preferred)
+    preferred = cleanName(preferred, "")
+    if preferred ~= "" and table.find(values, preferred) then
+        list:SetValue(preferred)
+        return preferred
+    end
+    if values[1] then
+        list:SetValue(values[1])
+        return values[1]
+    end
+    list:SetValue("--")
+    return "--"
 end
 
 local refreshThemeList = function() end
@@ -106,9 +122,10 @@ MainWindow:AddButton({
 local cursorId = ""
 
 CursorWindow:AddBox({
-    text = "Custom cursor id",
+    text = "Cursor id",
     flag = "custom_cursor_id",
     value = "",
+    skipConfig = true,
     callback = function(value)
         cursorId = value
         if Library.customCursorEnabled then
@@ -121,6 +138,7 @@ CursorWindow:AddToggle({
     text = "Custom cursor",
     flag = "custom_cursor",
     state = false,
+    skipConfig = true,
     callback = function(enabled)
         if enabled then
             Library:SetCustomCursor(cursorId)
@@ -141,10 +159,11 @@ CursorWindow:AddButton({
 local themeName = "default"
 local selectedTheme = "--"
 
-local themeColor = ThemeManager:AddColor({
+local themeColor = ThemeEditor:AddColor({
     text = "Accent",
     flag = "theme_accent",
     color = Library:GetTheme().Accent,
+    skipConfig = true,
     callback = function(color)
         Library:SetTheme({ Accent = color })
         statusLabel:Set("Status: theme accent stored")
@@ -184,132 +203,38 @@ local fontValues = {
     "Antique"
 }
 
-local themeFont = ThemeManager:AddList({
+local themeFont = ThemeEditor:AddList({
     text = "Font",
     flag = "ui_font",
     value = "Default",
     values = fontValues,
+    skipConfig = true,
     callback = function(fontName)
         local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(fontName)
         setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
     end
 })
 
-ThemeManager:AddBox({
+ThemeEditor:AddBox({
     text = "Theme name",
     flag = "theme_name",
     value = themeName,
+    skipConfig = true,
     callback = function(value)
         themeName = cleanName(value, "default")
     end
 })
 
-ThemeManager:AddButton({
+ThemeEditor:AddButton({
     text = "Create theme",
     callback = function()
         local ok, result = Library:SaveTheme(themeName)
         setStatus(ok, "theme created", result)
-        refreshThemeList()
+        refreshThemeList(themeName)
     end
 })
 
-local themeDefaultLabel = ThemeManager:AddLabel({ text = "Default theme: none" })
-
-local themeList = ThemeManager:AddList({
-    text = "Themes",
-    flag = "theme_list",
-    value = "--",
-    values = { "--" },
-    callback = function(value)
-        selectedTheme = value
-    end
-})
-
-local function updateThemeDefaultLabel()
-    themeDefaultLabel:Set("Default theme: " .. (Library:GetDefaultTheme() or "none"))
-end
-
-refreshThemeList = function()
-    if not themeList.ClearValues then return end
-
-    local themes, err = Library:GetThemeList()
-    themeList:ClearValues()
-
-    if #themes == 0 then
-        themeList:AddValue("--")
-        themeList:SetValue("--")
-        selectedTheme = "--"
-    else
-        for _, name in next, themes do
-            themeList:AddValue(name)
-        end
-        themeList:SetValue(themes[1])
-        selectedTheme = themes[1]
-    end
-
-    updateThemeDefaultLabel()
-    if err then
-        statusLabel:Set("Status: " .. err)
-    end
-end
-
-ThemeManager:AddButton({
-    text = "Load theme",
-    callback = function()
-        local ok, result = Library:LoadTheme(selectedName(selectedTheme, themeName, "default"))
-        if ok then
-            themeColor:SetColor(Library:GetTheme().Accent)
-            themeFont:SetValue(Library:GetTheme().Font or "Default")
-        end
-        setStatus(ok, "theme loaded", result)
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Overwrite theme",
-    callback = function()
-        local ok, result = Library:SaveTheme(selectedName(selectedTheme, themeName, "default"))
-        setStatus(ok, "theme overwritten", result)
-        refreshThemeList()
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Delete theme",
-    callback = function()
-        local ok, result = Library:DeleteTheme(selectedName(selectedTheme, themeName, "default"))
-        setStatus(ok, "theme deleted", result)
-        refreshThemeList()
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Refresh list",
-    callback = function()
-        refreshThemeList()
-        statusLabel:Set("Status: theme list refreshed")
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Set as default",
-    callback = function()
-        local ok, result = Library:SetDefaultTheme(selectedName(selectedTheme, themeName, "default"))
-        setStatus(ok, "default theme set", result)
-        updateThemeDefaultLabel()
-    end
-})
-
-ThemeManager:AddButton({
-    text = "Reset default",
-    callback = function()
-        local ok, result = Library:ResetDefaultTheme()
-        setStatus(ok, "default theme reset", result)
-        updateThemeDefaultLabel()
-    end
-})
-
-ThemeManager:AddButton({
+ThemeEditor:AddButton({
     text = "Reset theme",
     callback = function()
         Library:ResetTheme()
@@ -319,34 +244,134 @@ ThemeManager:AddButton({
     end
 })
 
+local themeDefaultLabel = ThemeFiles:AddLabel({ text = "Default theme: none" })
+
+local themeList = ThemeFiles:AddList({
+    text = "Themes",
+    flag = "theme_list",
+    value = "--",
+    values = { "--" },
+    skipConfig = true,
+    callback = function(value)
+        selectedTheme = value
+    end
+})
+
+local function updateThemeDefaultLabel()
+    themeDefaultLabel:Set("Default theme: " .. (Library:GetDefaultTheme() or "none"))
+end
+
+refreshThemeList = function(preferred)
+    if not themeList.ClearValues then return end
+
+    local themes, err = Library:GetThemeList()
+    themeList:ClearValues()
+
+    if #themes == 0 then
+        themeList:AddValue("--")
+        selectedTheme = selectPreferred(themeList, {}, nil)
+    else
+        for _, name in next, themes do
+            themeList:AddValue(name)
+        end
+        selectedTheme = selectPreferred(themeList, themes, preferred or selectedTheme)
+    end
+
+    updateThemeDefaultLabel()
+    if err then
+        statusLabel:Set("Status: " .. err)
+    end
+end
+
+ThemeFiles:AddButton({
+    text = "Load theme",
+    callback = function()
+        local name = selectedName(selectedTheme, themeName, "default")
+        local ok, result = Library:LoadTheme(name)
+        if ok then
+            themeColor:SetColor(Library:GetTheme().Accent)
+            themeFont:SetValue(Library:GetTheme().Font or "Default")
+        end
+        setStatus(ok, "theme loaded", result)
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Overwrite theme",
+    callback = function()
+        local name = selectedName(selectedTheme, themeName, "default")
+        local ok, result = Library:SaveTheme(name)
+        setStatus(ok, "theme overwritten", result)
+        refreshThemeList(name)
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Delete theme",
+    callback = function()
+        local name = selectedName(selectedTheme, themeName, "default")
+        local ok, result = Library:DeleteTheme(name)
+        setStatus(ok, "theme deleted", result)
+        refreshThemeList()
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Refresh list",
+    callback = function()
+        refreshThemeList(selectedTheme)
+        statusLabel:Set("Status: theme list refreshed")
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Set as default",
+    callback = function()
+        local ok, result = Library:SetDefaultTheme(selectedName(selectedTheme, themeName, "default"))
+        setStatus(ok, "default theme set", result)
+        updateThemeDefaultLabel()
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Reset default",
+    callback = function()
+        local ok, result = Library:ResetDefaultTheme()
+        setStatus(ok, "default theme reset", result)
+        updateThemeDefaultLabel()
+    end
+})
+
 local configName = "default"
 local selectedConfig = "--"
 
-Configuration:AddBox({
+ConfigEditor:AddBox({
     text = "Config name",
     flag = "config_name",
     value = configName,
+    skipConfig = true,
     callback = function(value)
         configName = cleanName(value, "default")
     end
 })
 
-Configuration:AddButton({
+ConfigEditor:AddButton({
     text = "Create config",
     callback = function()
         local ok, result = Library:SaveConfig(configName)
         setStatus(ok, "config created", result)
-        refreshConfigList()
+        refreshConfigList(configName)
     end
 })
 
-local autoloadLabel = Configuration:AddLabel({ text = "Autoload config: none" })
+local autoloadLabel = ConfigFiles:AddLabel({ text = "Autoload config: none" })
 
-local configList = Configuration:AddList({
+local configList = ConfigFiles:AddList({
     text = "Configs",
     flag = "config_list",
     value = "--",
     values = { "--" },
+    skipConfig = true,
     callback = function(value)
         selectedConfig = value
     end
@@ -356,7 +381,7 @@ local function updateAutoloadLabel()
     autoloadLabel:Set("Autoload config: " .. (Library:GetAutoloadConfig() or "none"))
 end
 
-refreshConfigList = function()
+refreshConfigList = function(preferred)
     if not configList.ClearValues then return end
 
     local configs, err = Library:GetConfigList()
@@ -364,14 +389,12 @@ refreshConfigList = function()
 
     if #configs == 0 then
         configList:AddValue("--")
-        configList:SetValue("--")
-        selectedConfig = "--"
+        selectedConfig = selectPreferred(configList, {}, nil)
     else
         for _, name in next, configs do
             configList:AddValue(name)
         end
-        configList:SetValue(configs[1])
-        selectedConfig = configs[1]
+        selectedConfig = selectPreferred(configList, configs, preferred or selectedConfig)
     end
 
     updateAutoloadLabel()
@@ -380,7 +403,7 @@ refreshConfigList = function()
     end
 end
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Load config",
     callback = function()
         local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
@@ -393,33 +416,35 @@ Configuration:AddButton({
     end
 })
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Overwrite config",
     callback = function()
-        local ok, result = Library:SaveConfig(selectedName(selectedConfig, configName, "default"))
+        local name = selectedName(selectedConfig, configName, "default")
+        local ok, result = Library:SaveConfig(name)
         setStatus(ok, "config overwritten", result)
-        refreshConfigList()
+        refreshConfigList(name)
     end
 })
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Delete config",
     callback = function()
-        local ok, result = Library:DeleteConfig(selectedName(selectedConfig, configName, "default"))
+        local name = selectedName(selectedConfig, configName, "default")
+        local ok, result = Library:DeleteConfig(name)
         setStatus(ok, "config deleted", result)
         refreshConfigList()
     end
 })
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Refresh list",
     callback = function()
-        refreshConfigList()
+        refreshConfigList(selectedConfig)
         statusLabel:Set("Status: config list refreshed")
     end
 })
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Set as autoload",
     callback = function()
         local ok, result = Library:SetAutoloadConfig(selectedName(selectedConfig, configName, "default"))
@@ -428,7 +453,7 @@ Configuration:AddButton({
     end
 })
 
-Configuration:AddButton({
+ConfigFiles:AddButton({
     text = "Reset autoload",
     callback = function()
         local ok, result = Library:ResetAutoloadConfig()
