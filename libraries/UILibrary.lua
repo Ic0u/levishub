@@ -2586,7 +2586,6 @@ end
 
 local function playIntro(root, windows)
     local fadeTargets = collectFadeTargets(root)
-    local scaleTargets = {}
 
     for _, item in next, fadeTargets do
         local object = item.object
@@ -2607,32 +2606,38 @@ local function playIntro(root, windows)
     for index, window in next, windows do
         if window.main then
             local position = window.main.Position
+            local size = window.main.Size
             local scale = ensureWindowScale(window)
             local order = window.position or index
-            local direction = order % 2 == 0 and -1 or 1
             local delayTime = math.min(order * 0.035, 0.18)
+            local height = math.max(window.main.AbsoluteSize.Y, size.Y.Offset, 40)
+            local collapsedHeight = 6
+            local startOffset = math.floor((height - collapsedHeight) * 0.5)
+            local originalClips = window.main.ClipsDescendants
 
-            scale.Scale = 0.82
-            table.insert(scaleTargets, scale)
+            scale.Scale = 1
+            window.main.ClipsDescendants = true
+            window.main.Size = UDim2.new(size.X.Scale, size.X.Offset, 0, collapsedHeight)
+            window.main.Position = offsetUDim2(position, 0, startOffset)
+            window.main.Rotation = 0
 
-            window.main.Position = offsetUDim2(position, direction * 20, 30)
-            window.main.Rotation = direction * -4
-            tweenService:Create(window.main, TweenInfo.new(0.56, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delayTime), {
+            tweenService:Create(window.main, TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delayTime), {
                 Position = position,
-                Rotation = 0
+                Size = size
             }):Play()
+
+            delay(0.4 + delayTime, function()
+                if window.main and window.main.Parent then
+                    window.main.Position = position
+                    window.main.Size = size
+                    window.main.ClipsDescendants = originalClips
+                end
+            end)
         end
     end
 
     for _, item in next, fadeTargets do
-        tweenService:Create(item.object, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), item.props):Play()
-    end
-
-    for index, scale in next, scaleTargets do
-        local delayTime = math.min((index - 1) * 0.035, 0.18)
-        tweenService:Create(scale, TweenInfo.new(0.56, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delayTime), {
-            Scale = 1
-        }):Play()
+        tweenService:Create(item.object, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), item.props):Play()
     end
 end
 
