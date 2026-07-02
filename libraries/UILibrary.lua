@@ -178,7 +178,7 @@ local function cancelDrag()
     dragging = false
     if dragObject and dragOriginalClips ~= nil then
         pcall(function()
-            dragObject.ClipsDescendants = dragOriginalClips
+            dragObject.ClipsDescendants = true
         end)
     end
     dragObject = nil
@@ -1329,11 +1329,18 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Parent = parentTable.content
     })
 
-    layout.Changed:connect(function()
+    local function refreshHolderSize()
         parentTable.content.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
         parentTable.main.Size = #parentTable.options > 0 and parentTable.open and
         UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or UDim2.new(0, 230, 0, size)
-    end)
+        if parentTable.parentHolder and parentTable.parentHolder.RefreshSize then
+            parentTable.parentHolder.RefreshSize()
+        end
+    end
+    parentTable.RefreshSize = refreshHolderSize
+
+    layout.Changed:connect(refreshHolderSize)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):connect(refreshHolderSize)
 
     if not subHolder then
         library:Create("UIPadding", {
@@ -1351,7 +1358,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
                 dragLastMouseX = dragStart.X
                 dragVelocityX = 0
                 dragRotationVelocity = 0
-                dragOriginalClips = dragObject.ClipsDescendants
+                dragOriginalClips = true
                 dragObject.ClipsDescendants = false
             end
         end)
@@ -1380,6 +1387,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
             parentTable.main:TweenSize(
             #parentTable.options > 0 and parentTable.open and UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or
             UDim2.new(0, 230, 0, size), "Out", "Quad", 0.2, true)
+            delay(0.22, refreshHolderSize)
         end
     end)
 
@@ -3042,6 +3050,7 @@ local function getFnctions(parent)
         option.open = false
         option.type = "folder"
         option.position = #self.options
+        option.parentHolder = self
         table.insert(self.options, option)
 
         getFnctions(option)
@@ -3302,6 +3311,7 @@ function library:Close()
                 local order = window.position or index
                 local stagger = math.min(order * 0.018, maxStagger)
 
+                window.main.ClipsDescendants = true
                 window.main.Visible = true
                 window.main.Position = offsetUDim2(position, 0, -slideDistance)
                 window.main.Rotation = 0
@@ -3320,6 +3330,11 @@ function library:Close()
 
         delay(duration + maxStagger, function()
             applyFadeTargets(targets, false)
+            for _, window in next, self.windows do
+                if window.main then
+                    window.main.ClipsDescendants = true
+                end
+            end
             self:ApplyTheme()
             self.isAnimating = false
         end)
@@ -3344,6 +3359,7 @@ function library:Close()
                 local order = window.position or index
                 local stagger = math.min(order * 0.014, maxStagger)
 
+                window.main.ClipsDescendants = true
                 window._visiblePosition = window.main.Position
                 tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, stagger), {
                     Position = offsetUDim2(window.main.Position, 0, -slideDistance)
@@ -3362,6 +3378,7 @@ function library:Close()
             applyFadeTargets(targets, true)
             for _, window in next, self.windows do
                 if window.main and not self.open then
+                    window.main.ClipsDescendants = true
                     window.main.Visible = false
                 end
             end
@@ -3554,7 +3571,7 @@ runService.RenderStepped:connect(function(dt)
     if not dragging and math.abs(dragObject.Rotation) < 0.05 and math.abs(dragRotationVelocity or 0) < 0.05 then
         dragObject.Rotation = 0
         if dragOriginalClips ~= nil then
-            dragObject.ClipsDescendants = dragOriginalClips
+            dragObject.ClipsDescendants = true
         end
         dragObject = nil
         dragTarget = nil
