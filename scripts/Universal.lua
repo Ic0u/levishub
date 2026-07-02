@@ -274,7 +274,7 @@ local dpiScaleList = SettingsWindow:AddList({
     text = "DPI Scale",
     flag = "dpi_scale",
     value = currentDpiScaleText(),
-    values = { "100%", "125%", "150%", "200%" },
+    values = { "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
     skipConfig = true,
     callback = function(value)
         Library:SetDPIScale(value)

@@ -662,21 +662,46 @@ local function serializeThemeValue(value)
     return serialized
 end
 
+local function colorSignature(color)
+    color = tableToColor(color) or DEFAULT_ACCENT
+    return ("%d,%d,%d"):format(
+        math.floor((color.R * 255) + 0.5),
+        math.floor((color.G * 255) + 0.5),
+        math.floor((color.B * 255) + 0.5)
+    )
+end
+
+local function createColorSequence(main, second)
+    main = tableToColor(main) or DEFAULT_ACCENT
+    second = tableToColor(second) or main
+    return ColorSequence.new({
+        ColorSequenceKeypoint.new(0, main),
+        ColorSequenceKeypoint.new(1, second)
+    })
+end
+
 local function createThemeGradient(parent, path, isEnabled)
     local gradient = library:Create("UIGradient", {
         Enabled = false,
-        Color = ColorSequence.new(DEFAULT_ACCENT, DEFAULT_ACCENT),
+        Color = createColorSequence(DEFAULT_ACCENT, DEFAULT_ACCENT),
         Parent = parent
     })
 
-    library:RegisterThemeObject(gradient, "Enabled", function(theme)
+    library:RegisterThemeUpdater(gradient, function(theme)
         local enabled = readThemeBool(theme, path .. ".Gradient", false)
-        return enabled and (not isEnabled or isEnabled())
-    end)
-    library:RegisterThemeObject(gradient, "Color", function(theme)
+        enabled = enabled and (not isEnabled or isEnabled())
+        if gradient.Enabled ~= enabled then
+            gradient.Enabled = enabled
+        end
+
         local main = readThemeColor(theme, path .. ".MainColor", DEFAULT_ACCENT)
         local second = readThemeColor(theme, path .. ".SecondColor", main)
-        return ColorSequence.new(main, second)
+        local signature = colorSignature(main) .. "|" .. colorSignature(second)
+        library._gradientSignatures = library._gradientSignatures or setmetatable({}, { __mode = "k" })
+        if library._gradientSignatures[gradient] ~= signature then
+            gradient.Color = createColorSequence(main, second)
+            library._gradientSignatures[gradient] = signature
+        end
     end)
 
     return gradient
@@ -984,6 +1009,21 @@ function library:RegisterThemeObject(object, property, resolver)
     end)
 end
 
+function library:RegisterThemeUpdater(object, updater)
+    if not object or typeof(updater) ~= "function" then return end
+    if self.liveAccentThemes ~= true then return end
+
+    local item = {
+        object = object,
+        updater = updater
+    }
+    table.insert(self.themeObjects, item)
+
+    pcall(function()
+        item.updater(self.theme)
+    end)
+end
+
 function library:ApplyTheme()
     if self.liveAccentThemes ~= true then return end
 
@@ -996,7 +1036,11 @@ function library:ApplyTheme()
             aliveCount = aliveCount + 1
             self.themeObjects[aliveCount] = item
             pcall(function()
-                item.object[item.property] = item.resolver(self.theme)
+                if item.updater then
+                    item.updater(self.theme)
+                else
+                    item.object[item.property] = item.resolver(self.theme)
+                end
             end)
         end
     end
