@@ -3452,63 +3452,24 @@ function library:Unload()
         self.activePopup = nil
     end
 
-    local duration = 0.72
+    local duration = 0.3
     local targets = collectFadeTargets(self.base)
 
-    local flash = self:Create("Frame", {
-        ZIndex = 999,
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundColor3 = getAccent(),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Parent = self.base
-    })
-    tweenService:Create(flash, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        BackgroundTransparency = 0.72
-    }):Play()
-    delay(0.08, function()
-        if flash and flash.Parent then
-            tweenService:Create(flash, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-                BackgroundTransparency = 1
-            }):Play()
-        end
-    end)
-
-    for index, window in next, self.windows do
+    for _, window in next, self.windows do
         if window.main then
             local scale = ensureWindowScale(window)
-            local order = window.position or index
-            local direction = order % 2 == 0 and -1 or 1
-            local stagger = math.min(order * 0.025, 0.14)
-            local startPosition = window.main.Position
-
-            window.main.ClipsDescendants = false
-            tweenService:Create(window.main, TweenInfo.new(0.13, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, stagger), {
-                Position = offsetUDim2(startPosition, direction * 10, -16),
-                Rotation = direction * -7
+            window.main.ClipsDescendants = true
+            window.main.Rotation = 0
+            tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Scale = 0.97
             }):Play()
-            tweenService:Create(scale, TweenInfo.new(0.13, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, stagger), {
-                Scale = 1.08
-            }):Play()
-            delay(0.11 + stagger, function()
-                if window.main and window.main.Parent then
-                    tweenService:Create(window.main, TweenInfo.new(0.46, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                        Position = offsetUDim2(startPosition, direction * 180, 128),
-                        Rotation = direction * 26
-                    }):Play()
-                    tweenService:Create(scale, TweenInfo.new(0.46, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                        Scale = 0.48
-                    }):Play()
-                end
-            end)
         end
     end
 
-    delay(0.16, function()
-        tweenFadeTargets(targets, true, 0.38)
-    end)
+    tweenFadeTargets(targets, true, duration)
 
     delay(duration, function()
+        applyFadeTargets(targets, true)
         self:Destroy()
     end)
 
