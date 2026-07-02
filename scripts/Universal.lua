@@ -241,7 +241,17 @@ local function addThemeBox(folder, text, path, fallback)
 end
 
 local ThemeFolder = SettingsWindow:AddFolder("Theme")
-local ConfigFolder = SettingsWindow:AddFolder("Config")
+local ConfigFolder = SettingsWindow:AddFolder("Configs")
+
+SettingsWindow:AddBind({
+    text = "Panic Key",
+    flag = "panic_key",
+    key = "End",
+    skipConfig = true,
+    callback = function()
+        Library:Destroy()
+    end
+})
 
 SettingsWindow:AddBind({
     text = "Toggle",
@@ -565,7 +575,20 @@ syncThemeControls = function()
 end
 
 local configName = "default"
+local renameConfigName = ""
 local selectedConfig = "--"
+local selectedConfigLabel
+
+local function selectedConfigDisplay()
+    local name = cleanName(selectedConfig, "")
+    return name == "" and "None" or name
+end
+
+local function updateSelectedConfigLabel()
+    if selectedConfigLabel then
+        selectedConfigLabel:Set("Selected Config: " .. selectedConfigDisplay())
+    end
+end
 
 ConfigFolder:AddBox({
     text = "Config name",
@@ -586,8 +609,6 @@ ConfigFolder:AddButton({
     end
 })
 
-local autoloadLabel = ConfigFolder:AddLabel({ text = "Autoload config: none" })
-
 local configList = ConfigFolder:AddList({
     text = "Configs",
     flag = "config_list",
@@ -596,8 +617,50 @@ local configList = ConfigFolder:AddList({
     skipConfig = true,
     callback = function(value)
         selectedConfig = value
+        updateSelectedConfigLabel()
     end
 })
+
+selectedConfigLabel = ConfigFolder:AddLabel({ text = "Selected Config: None" })
+
+ConfigFolder:AddBox({
+    text = "Rename config to",
+    flag = "rename_config_name",
+    value = renameConfigName,
+    skipConfig = true,
+    callback = function(value)
+        renameConfigName = cleanName(value, "")
+    end
+})
+
+ConfigFolder:AddButton({
+    text = "Rename config",
+    callback = function()
+        local oldName = cleanName(selectedConfig, "")
+        if oldName == "" then
+            setStatus(false, nil, "select a config first")
+            updateSelectedConfigLabel()
+            return
+        end
+
+        local newName = cleanName(renameConfigName, "")
+        if newName == "" then
+            setStatus(false, nil, "enter a new config name")
+            return
+        end
+
+        local ok, result = Library:RenameConfig(oldName, newName)
+        setStatus(ok, "config renamed", result)
+        if ok then
+            configName = newName
+            refreshConfigList(newName)
+        else
+            updateSelectedConfigLabel()
+        end
+    end
+})
+
+local autoloadLabel = ConfigFolder:AddLabel({ text = "Autoload config: none" })
 
 local function updateAutoloadLabel()
     autoloadLabel:Set("Autoload config: " .. (Library:GetAutoloadConfig() or "none"))
@@ -619,6 +682,7 @@ refreshConfigList = function(preferred)
         selectedConfig = selectPreferred(configList, configs, preferred or selectedConfig)
     end
 
+    updateSelectedConfigLabel()
     updateAutoloadLabel()
     if err then
         statusLabel:Set("Status: " .. err)

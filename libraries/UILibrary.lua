@@ -1192,6 +1192,61 @@ function library:DeleteConfig(name)
     return deleted, result
 end
 
+function library:RenameConfig(oldName, newName)
+    local ok, err = ensureSaveFolders()
+    if not ok then return false, err end
+
+    oldName = displaySaveName(oldName)
+    newName = displaySaveName(newName)
+
+    if oldName == "" or oldName == "--" then
+        return false, "select a config first"
+    end
+    if newName == "" or newName == "--" then
+        return false, "enter a new config name"
+    end
+    if oldName == newName then
+        return false, "new config name matches selected config"
+    end
+    if type(delfile) ~= "function" then
+        return false, "executor delfile API unavailable"
+    end
+
+    local oldPath = buildSavePath(CONFIG_FOLDER, oldName)
+    local newPath = buildSavePath(CONFIG_FOLDER, newName)
+    if not safeIsFile(oldPath) then
+        return false, "config file not found"
+    end
+    if safeIsFile(newPath) then
+        return false, "config name already exists"
+    end
+
+    local read, raw = safeReadFile(oldPath)
+    if not read then
+        return false, raw
+    end
+
+    local written, result = safeWriteFile(newPath, raw)
+    if not written then
+        return false, result
+    end
+
+    local deleted, deleteResult = deleteSaveFile(oldPath)
+    if not deleted then
+        deleteSaveFile(newPath)
+        return false, deleteResult
+    end
+
+    untrackSaveName(CONFIG_INDEX_FILE, oldName)
+    trackSaveName(CONFIG_INDEX_FILE, newName)
+
+    if self:GetAutoloadConfig() == oldName then
+        writeMarker(CONFIG_AUTOLOAD_FILE, newName)
+    end
+
+    return true, newPath
+end
+
 function library:SetAutoloadConfig(name)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
