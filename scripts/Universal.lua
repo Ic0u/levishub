@@ -251,8 +251,36 @@ local function addThemeBox(folder, text, path, fallback)
     return control
 end
 
-local ThemeFolder = SettingsWindow:AddFolder("Theme")
+local ThemeFolder = SettingsWindow:AddFolder("Themes")
 local ConfigFolder = SettingsWindow:AddFolder("Configs")
+
+local function currentDpiScaleText()
+    return tostring(math.floor((Library:GetDPIScale() * 100) + 0.5)) .. "%"
+end
+
+local notificationSideList = SettingsWindow:AddList({
+    text = "Notification Side",
+    flag = "notification_side",
+    value = Library:GetNotificationSide(),
+    values = { "Right", "Left" },
+    skipConfig = true,
+    callback = function(value)
+        Library:SetNotificationSide(value)
+        statusLabel:Set("Status: notifications on " .. tostring(value):lower())
+    end
+})
+
+local dpiScaleList = SettingsWindow:AddList({
+    text = "DPI Scale",
+    flag = "dpi_scale",
+    value = currentDpiScaleText(),
+    values = { "100%", "125%", "150%", "200%" },
+    skipConfig = true,
+    callback = function(value)
+        Library:SetDPIScale(value)
+        statusLabel:Set("Status: dpi scale " .. tostring(value))
+    end
+})
 
 local uiTransparencySlider = SettingsWindow:AddSlider({
     text = "UI Transparency (%)",
@@ -268,11 +296,31 @@ local uiTransparencySlider = SettingsWindow:AddSlider({
     end
 })
 
+SettingsWindow:AddBind({
+    text = "Panic Key",
+    flag = "panic_key",
+    key = "End",
+    skipConfig = true,
+    callback = function()
+        Library:Destroy()
+    end
+})
+
+SettingsWindow:AddBind({
+    text = "UI Toggle",
+    flag = "toggle_ui",
+    key = "RightShift",
+    skipConfig = true,
+    callback = function()
+        Library:Close()
+    end
+})
+
 SettingsWindow:AddButton({
-    text = "Save Gui Layout",
+    text = "Save UI Layout",
     callback = function()
         local ok, result = Library:SaveGuiLayout()
-        setStatus(ok, "gui layout saved", result)
+        setStatus(ok, "ui layout saved", result)
     end
 })
 
@@ -292,26 +340,6 @@ SettingsWindow:AddButton({
     end
 })
 
-SettingsWindow:AddBind({
-    text = "Panic Key",
-    flag = "panic_key",
-    key = "End",
-    skipConfig = true,
-    callback = function()
-        Library:Destroy()
-    end
-})
-
-SettingsWindow:AddBind({
-    text = "Toggle",
-    flag = "toggle_ui",
-    key = "RightShift",
-    skipConfig = true,
-    callback = function()
-        Library:Close()
-    end
-})
-
 SettingsWindow:AddButton({
     text = "Unload",
     callback = function()
@@ -328,6 +356,7 @@ SettingsWindow:AddButton({
 })
 
 SettingsWindow:AddLabel({ text = "Updated v2.06.2026" })
+SettingsWindow:AddLabel({ text = "Made by Marcus" })
 
 local themeColor = ThemeFolder:AddColor({
     text = "Accent",
@@ -482,7 +511,7 @@ addThemeColor(TextInputTheme, "Slider background", "Slider.BackgroundColor")
 addThemeColor(TextInputTheme, "Slider fill", "Slider.Color2")
 addThemeColor(TextInputTheme, "Divider", "Divider.Color")
 
-local ThemeFiles = ThemeFolder:AddFolder("Theme Files")
+local ThemeFiles = ThemeFolder:AddFolder("Custom themes")
 
 local themeNameBox = ThemeFiles:AddBox({
     text = "Theme name",
@@ -774,6 +803,8 @@ ConfigFolder:AddButton({
     callback = function()
         local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
         if ok then
+            notificationSideList:SetValue(Library:GetNotificationSide())
+            dpiScaleList:SetValue(currentDpiScaleText())
             uiTransparencySlider:SetValue(Library:GetUITransparency())
             syncThemeControls()
             updateAutoloadLabel()
@@ -833,6 +864,8 @@ refreshThemeList()
 refreshConfigList()
 
 delay(0.75, function()
+    notificationSideList:SetValue(Library:GetNotificationSide())
+    dpiScaleList:SetValue(currentDpiScaleText())
     uiTransparencySlider:SetValue(Library:GetUITransparency())
     syncThemeControls()
     refreshThemeList(selectedTheme)

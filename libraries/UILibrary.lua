@@ -110,6 +110,8 @@ local library = {
     notifications = {},
     savedGuiLayout = nil,
     uiTransparency = 0,
+    notificationSide = "Right",
+    dpiScale = 1,
     _uiTransparencyDefaults = nil,
     liveAccentThemes = true
 }
@@ -123,6 +125,7 @@ local httpService = game:GetService "HttpService"
 
 --Locals
 local dragging, dragStart, startPos, dragObject, dragTarget, dragLastMouseX, dragVelocityX, dragRotationVelocity, dragOriginalClips
+local ensureWindowScale
 
 local ROOT_FOLDER = "Levis Hub"
 local THEME_FOLDER = ROOT_FOLDER .. "/Theme"
@@ -161,6 +164,41 @@ end
 
 local function getAccent()
     return library.theme.Accent or DEFAULT_ACCENT
+end
+
+local function normalizeNotificationSide(side)
+    side = tostring(side or "Right"):lower()
+    return side == "left" and "Left" or "Right"
+end
+
+local function normalizeDpiScale(scale)
+    if type(scale) == "string" then
+        scale = scale:gsub("%%", "")
+    end
+    scale = tonumber(scale) or 1
+    if scale > 3 then
+        scale = scale / 100
+    end
+    return math.clamp(scale, 0.5, 2)
+end
+
+local function getDpiScale(multiplier)
+    return (library.dpiScale or 1) * (multiplier or 1)
+end
+
+local function getNotificationAnchor(side)
+    side = normalizeNotificationSide(side)
+    return Vector2.new(side == "Left" and 0 or 1, 1)
+end
+
+local function getNotificationPosition(side, index)
+    side = normalizeNotificationSide(side)
+    return UDim2.new(side == "Left" and 0 or 1, side == "Left" and 12 or -12, 1, -12 - (((index or 1) - 1) * 86))
+end
+
+local function getNotificationHiddenPosition(side, yScale, yOffset)
+    side = normalizeNotificationSide(side)
+    return UDim2.new(side == "Left" and 0 or 1, side == "Left" and -300 or 300, yScale or 1, yOffset or -12)
 end
 
 local function updateDragTarget(dt)
@@ -1298,6 +1336,35 @@ function library:GetUITransparency()
     return self.uiTransparency or 0
 end
 
+function library:SetNotificationSide(side)
+    self.notificationSide = normalizeNotificationSide(side)
+    self:LayoutNotifications()
+    return true
+end
+
+function library:GetNotificationSide()
+    return normalizeNotificationSide(self.notificationSide)
+end
+
+function library:SetDPIScale(scale)
+    self.dpiScale = normalizeDpiScale(scale)
+
+    for _, window in ipairs(self.windows) do
+        if window.main then
+            local scaleObject = ensureWindowScale(window)
+            if scaleObject then
+                scaleObject.Scale = getDpiScale()
+            end
+        end
+    end
+
+    return true
+end
+
+function library:GetDPIScale()
+    return self.dpiScale or 1
+end
+
 function library:SaveConfig(name)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
@@ -1320,7 +1387,9 @@ function library:SaveConfig(name)
         flags = values,
         theme = serializeThemeValue(self:GetTheme()),
         layout = self:GetGuiLayout(),
-        uiTransparency = self:GetUITransparency()
+        uiTransparency = self:GetUITransparency(),
+        notificationSide = self:GetNotificationSide(),
+        dpiScale = self:GetDPIScale()
     })
     if not encoded then
         return false, "failed to encode config"
@@ -1385,6 +1454,14 @@ function library:LoadConfig(name)
 
     if decoded.uiTransparency ~= nil then
         self:SetUITransparency(decoded.uiTransparency)
+    end
+
+    if decoded.notificationSide ~= nil then
+        self:SetNotificationSide(decoded.notificationSide)
+    end
+
+    if decoded.dpiScale ~= nil then
+        self:SetDPIScale(decoded.dpiScale)
     end
 
     if type(decoded.layout) == "table" then
@@ -1505,12 +1582,14 @@ end
 
 function library:LayoutNotifications()
     self.notifications = self.notifications or {}
+    local side = self:GetNotificationSide()
 
     local visibleIndex = 0
     for _, record in ipairs(self.notifications) do
         if record.frame and record.frame.Parent and not record.closed then
             visibleIndex = visibleIndex + 1
-            local target = UDim2.new(1, -12, 1, -12 - ((visibleIndex - 1) * 86))
+            record.frame.AnchorPoint = getNotificationAnchor(side)
+            local target = getNotificationPosition(side, visibleIndex)
             tweenService:Create(record.frame, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Position = target
             }):Play()
@@ -1532,8 +1611,9 @@ function library:DismissNotification(record)
     self:LayoutNotifications()
 
     if record.frame and record.frame.Parent then
+        local side = self:GetNotificationSide()
         tweenService:Create(record.frame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Position = UDim2.new(1, 300, record.frame.Position.Y.Scale, record.frame.Position.Y.Offset),
+            Position = getNotificationHiddenPosition(side, record.frame.Position.Y.Scale, record.frame.Position.Y.Offset),
             BackgroundTransparency = 1
         }):Play()
 
@@ -1594,11 +1674,12 @@ function library:Notify(message, duration, title)
     duration = math.max(tonumber(duration) or 3, 1)
     self.notifications = self.notifications or {}
     local panelTransparency = transparencyWithPercent(0, self.uiTransparency)
+    local side = self:GetNotificationSide()
 
     local frame = self:Create("Frame", {
         ZIndex = 220,
-        AnchorPoint = Vector2.new(1, 1),
-        Position = UDim2.new(1, 300, 1, -12),
+        AnchorPoint = getNotificationAnchor(side),
+        Position = getNotificationHiddenPosition(side, 1, -12),
         Size = UDim2.new(0, 260, 0, 78),
         BackgroundColor3 = Color3.fromRGB(18, 18, 18),
         BackgroundTransparency = 1,
@@ -3725,7 +3806,7 @@ local function tweenFadeTargets(targets, hidden, duration)
     end
 end
 
-local function ensureWindowScale(window)
+function ensureWindowScale(window)
     if not window.main then return end
     return window.main:FindFirstChild("LevisIntroScale") or library:Create("UIScale", {
         Name = "LevisIntroScale",
@@ -3764,7 +3845,7 @@ local function playIntro(root, windows)
             local startOffset = math.floor((height - collapsedHeight) * 0.5)
             local originalClips = window.main.ClipsDescendants
 
-            scale.Scale = 1
+            scale.Scale = getDpiScale()
             window.main.ClipsDescendants = true
             window.main.Size = UDim2.new(size.X.Scale, size.X.Offset, 0, collapsedHeight)
             window.main.Position = offsetUDim2(position, 0, startOffset)
@@ -3871,13 +3952,13 @@ function library:Close()
                 window.main.Visible = true
                 window.main.Position = offsetUDim2(position, 0, -slideDistance)
                 window.main.Rotation = 0
-                scale.Scale = 0.985
+                scale.Scale = getDpiScale(0.985)
 
                 tweenService:Create(window.main, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, stagger), {
                     Position = position
                 }):Play()
                 tweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, stagger), {
-                    Scale = 1
+                    Scale = getDpiScale()
                 }):Play()
             end
         end
@@ -3921,7 +4002,7 @@ function library:Close()
                     Position = offsetUDim2(window.main.Position, 0, -slideDistance)
                 }):Play()
                 tweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, stagger), {
-                    Scale = 0.985
+                    Scale = getDpiScale(0.985)
                 }):Play()
             end
         end
@@ -4020,7 +4101,7 @@ function library:Unload()
             window.main.ClipsDescendants = true
             window.main.Rotation = 0
             tweenService:Create(scale, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Scale = 0.97
+                Scale = getDpiScale(0.97)
             }):Play()
         end
     end
