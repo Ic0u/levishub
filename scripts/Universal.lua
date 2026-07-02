@@ -1,23 +1,17 @@
 -- ============================================================
 --  Levis Hub - Universal UI Test
---  Clean manager demo with separate windows.
+--  Minimal demo plus one compact UI Settings manager.
 -- ============================================================
 
 local UILIB_URL = "https://raw.githubusercontent.com/Ic0u/levishub/main/libraries/UILibrary.lua"
+local DISCORD_INVITE = "https://discord.gg/levishub"
 local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 
 local MainWindow = Library:CreateWindow("Levis Hub", UDim2.new(0, 20, 0, 20))
-local ThemeEditor = Library:CreateWindow("Theme Editor", UDim2.new(0, 270, 0, 20))
-local ThemeVisuals = Library:CreateWindow("Theme Visuals", UDim2.new(0, 520, 0, 20))
-local ThemeControls = Library:CreateWindow("Theme Controls", UDim2.new(0, 770, 0, 20))
-local ThemeFiles = Library:CreateWindow("Theme Files", UDim2.new(0, 1020, 0, 20))
-local ConfigEditor = Library:CreateWindow("Config Editor", UDim2.new(0, 270, 0, 500))
-local ConfigFiles = Library:CreateWindow("Config Files", UDim2.new(0, 520, 0, 500))
-local CursorWindow = Library:CreateWindow("Cursor", UDim2.new(0, 20, 0, 360))
+local SettingsWindow = Library:CreateWindow("UI Settings", UDim2.new(0, 270, 0, 20))
 
 local statusLabel = MainWindow:AddLabel({ text = "Status: ready" })
 MainWindow:AddDivider()
-MainWindow:AddLabel({ text = "RightShift toggles the UI" })
 
 local function cleanName(value, fallback)
     value = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -39,6 +33,24 @@ local function setStatus(ok, success, failure)
     statusLabel:Set(ok and ("Status: " .. success) or ("Status: " .. tostring(failure)))
 end
 
+local function copyToClipboard(text)
+    if type(setclipboard) == "function" then
+        local ok, err = pcall(function()
+            setclipboard(text)
+        end)
+        return ok, ok and text or tostring(err)
+    end
+
+    if type(toclipboard) == "function" then
+        local ok, err = pcall(function()
+            toclipboard(text)
+        end)
+        return ok, ok and text or tostring(err)
+    end
+
+    return false, "clipboard API unavailable"
+end
+
 local function selectPreferred(list, values, preferred)
     preferred = cleanName(preferred, "")
     if preferred ~= "" and table.find(values, preferred) then
@@ -52,10 +64,6 @@ local function selectPreferred(list, values, preferred)
     list:SetValue("--")
     return "--"
 end
-
-local refreshThemeList = function() end
-local refreshConfigList = function() end
-local syncThemeControls = function() end
 
 local function pathFlag(path)
     return "theme_" .. tostring(path):gsub("[^%w]+", "_"):lower()
@@ -89,6 +97,28 @@ local function setThemePath(path, value)
     local patch = {}
     writePath(patch, path, value)
     Library:SetTheme(patch)
+end
+
+local function applyAccentColor(color)
+    Library:SetTheme({
+        Accent = color,
+        TopBar = {
+            Line = {
+                SecondColor = color
+            }
+        },
+        Toggle = {
+            OnColor = color
+        },
+        Button = {
+            Color = {
+                SecondColor = color
+            }
+        },
+        Slider = {
+            Color2 = color
+        }
+    })
 end
 
 MainWindow:AddToggle({
@@ -140,58 +170,9 @@ MainWindow:AddColor({
     end
 })
 
-MainWindow:AddBind({
-    text = "Toggle UI",
-    flag = "toggle_ui",
-    key = "RightShift",
-    callback = function()
-        Library:Close()
-    end
-})
-
-MainWindow:AddButton({
-    text = "Unload UI",
-    callback = function()
-        Library:Unload()
-    end
-})
-
-local cursorId = ""
-
-CursorWindow:AddBox({
-    text = "Cursor id",
-    flag = "custom_cursor_id",
-    value = "",
-    skipConfig = true,
-    callback = function(value)
-        cursorId = value
-        if Library.customCursorEnabled then
-            Library:SetCustomCursor(cursorId)
-        end
-    end
-})
-
-CursorWindow:AddToggle({
-    text = "Custom cursor",
-    flag = "custom_cursor",
-    state = false,
-    skipConfig = true,
-    callback = function(enabled)
-        if enabled then
-            Library:SetCustomCursor(cursorId)
-        end
-        Library:SetCustomCursorEnabled(enabled)
-        statusLabel:Set("Status: custom cursor " .. (enabled and "on" or "off"))
-    end
-})
-
-CursorWindow:AddButton({
-    text = "Apply cursor id",
-    callback = function()
-        local ok = Library:SetCustomCursor(cursorId)
-        setStatus(ok, "cursor id applied", "cursor id missing")
-    end
-})
+local refreshThemeList = function() end
+local refreshConfigList = function() end
+local syncThemeControls = function() end
 
 local themeName = "default"
 local themeCreator = ""
@@ -211,13 +192,14 @@ local function themeStatus(message)
     end
 end
 
-local function addThemeColor(window, text, path)
-    local control = window:AddColor({
+local function addThemeColor(folder, text, path)
+    local control = folder:AddColor({
         text = text,
         flag = pathFlag(path),
         color = themeValue(path, Color3.fromRGB(255, 255, 255)),
         skipConfig = true,
         callback = function(color)
+            if syncingTheme then return end
             setThemePath(path, color)
             themeStatus("theme color updated")
         end
@@ -226,13 +208,14 @@ local function addThemeColor(window, text, path)
     return control
 end
 
-local function addThemeToggle(window, text, path)
-    local control = window:AddToggle({
+local function addThemeToggle(folder, text, path)
+    local control = folder:AddToggle({
         text = text,
         flag = pathFlag(path),
         state = themeValue(path, false) == true,
         skipConfig = true,
         callback = function(enabled)
+            if syncingTheme then return end
             setThemePath(path, enabled)
             themeStatus("theme toggle updated")
         end
@@ -241,13 +224,14 @@ local function addThemeToggle(window, text, path)
     return control
 end
 
-local function addThemeBox(window, text, path, fallback)
-    local control = window:AddBox({
+local function addThemeBox(folder, text, path, fallback)
+    local control = folder:AddBox({
         text = text,
         flag = pathFlag(path),
         value = tostring(themeValue(path, fallback or "")),
         skipConfig = true,
         callback = function(value)
+            if syncingTheme then return end
             setThemePath(path, tostring(value or ""))
             themeStatus("theme value updated")
         end
@@ -256,14 +240,46 @@ local function addThemeBox(window, text, path, fallback)
     return control
 end
 
-local themeColor = ThemeEditor:AddColor({
+local ThemeFolder = SettingsWindow:AddFolder("Theme")
+local ConfigFolder = SettingsWindow:AddFolder("Config")
+
+SettingsWindow:AddBind({
+    text = "Toggle",
+    flag = "toggle_ui",
+    key = "RightShift",
+    skipConfig = true,
+    callback = function()
+        Library:Close()
+    end
+})
+
+SettingsWindow:AddButton({
+    text = "Unload",
+    callback = function()
+        Library:Unload()
+    end
+})
+
+SettingsWindow:AddButton({
+    text = "Discord Invite",
+    callback = function()
+        local ok, result = copyToClipboard(DISCORD_INVITE)
+        setStatus(ok, "discord invite copied", result)
+    end
+})
+
+SettingsWindow:AddLabel({ text = "Updated v2.06.2026" })
+
+local themeColor = ThemeFolder:AddColor({
     text = "Accent",
     flag = "theme_accent",
     color = Library:GetTheme().Accent,
     skipConfig = true,
     callback = function(color)
-        Library:SetTheme({ Accent = color })
-        themeStatus("theme accent stored")
+        if syncingTheme then return end
+        applyAccentColor(color)
+        themeStatus("accent updated")
+        syncThemeControls()
     end
 })
 
@@ -323,43 +339,48 @@ local fontValues = {
     "TitilliumWeb"
 }
 
-local themeFont = ThemeEditor:AddList({
+local themeFont = ThemeFolder:AddList({
     text = "Font",
     flag = "ui_font",
     value = "Default",
     values = fontValues,
     skipConfig = true,
     callback = function(fontName)
+        if syncingTheme then return end
         local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(fontName)
-        if not syncingTheme then
-            setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
-        end
+        setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
     end
 })
 
-local themeNameBox = ThemeEditor:AddBox({
+local CursorTheme = ThemeFolder:AddFolder("Cursor")
+addThemeToggle(CursorTheme, "Custom cursor", "Cursor.Enabled")
+addThemeBox(CursorTheme, "Cursor id", "Cursor.Image", "")
+
+local themeNameBox = ThemeFolder:AddBox({
     text = "Theme name",
     flag = "theme_name",
     value = themeName,
     skipConfig = true,
     callback = function(value)
+        if syncingTheme then return end
         themeName = cleanName(value, "default")
         Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
     end
 })
 
-local themeCreatorBox = ThemeEditor:AddBox({
+local themeCreatorBox = ThemeFolder:AddBox({
     text = "Theme creator",
     flag = "theme_creator",
     value = themeCreator,
     skipConfig = true,
     callback = function(value)
+        if syncingTheme then return end
         themeCreator = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
         Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
     end
 })
 
-ThemeEditor:AddButton({
+ThemeFolder:AddButton({
     text = "Create theme",
     callback = function()
         local ok, result = Library:SaveTheme(themeName, { Name = themeName, Creator = themeCreator })
@@ -368,7 +389,7 @@ ThemeEditor:AddButton({
     end
 })
 
-ThemeEditor:AddButton({
+ThemeFolder:AddButton({
     text = "Reset theme",
     callback = function()
         Library:ResetTheme()
@@ -377,72 +398,42 @@ ThemeEditor:AddButton({
     end
 })
 
-ThemeVisuals:AddLabel({ text = "TopBar" })
-addThemeToggle(ThemeVisuals, "Topbar gradient", "TopBar.Line.Gradient")
-addThemeColor(ThemeVisuals, "Topbar main", "TopBar.Line.MainColor")
-addThemeColor(ThemeVisuals, "Topbar second", "TopBar.Line.SecondColor")
-addThemeColor(ThemeVisuals, "Topbar text", "TopBar.TextColor")
-addThemeColor(ThemeVisuals, "Topbar open icon", "TopBar.OnOffColor.On")
-addThemeColor(ThemeVisuals, "Topbar closed icon", "TopBar.OnOffColor.Off")
-ThemeVisuals:AddDivider()
-ThemeVisuals:AddLabel({ text = "Button" })
-addThemeToggle(ThemeVisuals, "Button gradient", "Button.Color.Gradient")
-addThemeColor(ThemeVisuals, "Button text", "Button.TextColor")
-addThemeColor(ThemeVisuals, "Button main", "Button.Color.MainColor")
-addThemeColor(ThemeVisuals, "Button second", "Button.Color.SecondColor")
-addThemeColor(ThemeVisuals, "Button hover", "Button.Color.HoverColor")
+local TopBarTheme = ThemeFolder:AddFolder("TopBar")
+addThemeToggle(TopBarTheme, "Gradient", "TopBar.Line.Gradient")
+addThemeColor(TopBarTheme, "Main", "TopBar.Line.MainColor")
+addThemeColor(TopBarTheme, "Second", "TopBar.Line.SecondColor")
+addThemeColor(TopBarTheme, "Text", "TopBar.TextColor")
+addThemeColor(TopBarTheme, "Open icon", "TopBar.OnOffColor.On")
+addThemeColor(TopBarTheme, "Closed icon", "TopBar.OnOffColor.Off")
 
-ThemeControls:AddLabel({ text = "Text / Folder" })
-addThemeColor(ThemeControls, "Text color", "Text.Color")
-addThemeColor(ThemeControls, "Folder text", "Folder.TextColor")
-addThemeColor(ThemeControls, "Folder open icon", "Folder.OnOff.On")
-addThemeColor(ThemeControls, "Folder closed icon", "Folder.OnOff.Off")
-addThemeBox(ThemeControls, "Folder icon id", "Folder.OnOff.Icon", "rbxassetid://4918373417")
-ThemeControls:AddDivider()
-ThemeControls:AddLabel({ text = "Toggle" })
-addThemeBox(ThemeControls, "Toggle icon id", "Toggle.Icon", "rbxassetid://4919148038")
-addThemeColor(ThemeControls, "Toggle stroke", "Toggle.StrokeColor")
-addThemeColor(ThemeControls, "Toggle on", "Toggle.OnColor")
-addThemeColor(ThemeControls, "Toggle off", "Toggle.OffColor")
-addThemeColor(ThemeControls, "Toggle hover", "Toggle.HoverColor")
-ThemeControls:AddDivider()
-ThemeControls:AddLabel({ text = "Inputs" })
-addThemeColor(ThemeControls, "Textbox main", "TextBox.MainColor")
-addThemeColor(ThemeControls, "Slider background", "Slider.BackgroundColor")
-addThemeColor(ThemeControls, "Slider fill", "Slider.Color2")
-addThemeColor(ThemeControls, "Divider", "Divider.Color")
+local FolderTheme = ThemeFolder:AddFolder("Folder")
+addThemeColor(FolderTheme, "Text", "Folder.TextColor")
+addThemeColor(FolderTheme, "Open icon", "Folder.OnOff.On")
+addThemeColor(FolderTheme, "Closed icon", "Folder.OnOff.Off")
+addThemeBox(FolderTheme, "Icon id", "Folder.OnOff.Icon", "rbxassetid://4918373417")
 
-syncThemeControls = function()
-    syncingTheme = true
+local ButtonTheme = ThemeFolder:AddFolder("Button")
+addThemeToggle(ButtonTheme, "Gradient", "Button.Color.Gradient")
+addThemeColor(ButtonTheme, "Text", "Button.TextColor")
+addThemeColor(ButtonTheme, "Main", "Button.Color.MainColor")
+addThemeColor(ButtonTheme, "Second", "Button.Color.SecondColor")
+addThemeColor(ButtonTheme, "Hover", "Button.Color.HoverColor")
 
-    local theme = Library:GetTheme()
-    local info = type(theme.Theme) == "table" and theme.Theme or {}
-    themeName = cleanName(info.Name, themeName)
-    themeCreator = tostring(info.Creator or "")
+local ToggleTheme = ThemeFolder:AddFolder("Toggle")
+addThemeBox(ToggleTheme, "Icon id", "Toggle.Icon", "rbxassetid://4919148038")
+addThemeColor(ToggleTheme, "Stroke", "Toggle.StrokeColor")
+addThemeColor(ToggleTheme, "On", "Toggle.OnColor")
+addThemeColor(ToggleTheme, "Off", "Toggle.OffColor")
+addThemeColor(ToggleTheme, "Hover", "Toggle.HoverColor")
 
-    themeNameBox:SetValue(themeName, true)
-    themeCreatorBox:SetValue(themeCreator, true)
-    themeColor:SetColor(theme.Accent)
-    themeFont:SetValue(theme.Font or "Default")
+local TextInputTheme = ThemeFolder:AddFolder("Text / Inputs")
+addThemeColor(TextInputTheme, "Text", "Text.Color")
+addThemeColor(TextInputTheme, "Textbox main", "TextBox.MainColor")
+addThemeColor(TextInputTheme, "Slider background", "Slider.BackgroundColor")
+addThemeColor(TextInputTheme, "Slider fill", "Slider.Color2")
+addThemeColor(TextInputTheme, "Divider", "Divider.Color")
 
-    for _, item in next, themeColorControls do
-        local color = readPath(theme, item.path)
-        if typeof(color) == "Color3" then
-            item.control:SetColor(color)
-        end
-    end
-
-    for _, item in next, themeToggleControls do
-        item.control:SetState(readPath(theme, item.path, false) == true)
-    end
-
-    for _, item in next, themeBoxControls do
-        item.control:SetValue(tostring(readPath(theme, item.path, item.fallback)), true)
-    end
-
-    syncingTheme = false
-end
-
+local ThemeFiles = ThemeFolder:AddFolder("Theme Files")
 local themeDefaultLabel = ThemeFiles:AddLabel({ text = "Default theme: none" })
 
 local themeList = ThemeFiles:AddList({
@@ -540,10 +531,41 @@ ThemeFiles:AddButton({
     end
 })
 
+syncThemeControls = function()
+    syncingTheme = true
+
+    local theme = Library:GetTheme()
+    local info = type(theme.Theme) == "table" and theme.Theme or {}
+    themeName = cleanName(info.Name, themeName)
+    themeCreator = tostring(info.Creator or "")
+
+    themeNameBox:SetValue(themeName, true)
+    themeCreatorBox:SetValue(themeCreator, true)
+    themeColor:SetColor(theme.Accent)
+    themeFont:SetValue(theme.Font or "Default")
+
+    for _, item in next, themeColorControls do
+        local color = readPath(theme, item.path)
+        if typeof(color) == "Color3" then
+            item.control:SetColor(color)
+        end
+    end
+
+    for _, item in next, themeToggleControls do
+        item.control:SetState(readPath(theme, item.path, false) == true)
+    end
+
+    for _, item in next, themeBoxControls do
+        item.control:SetValue(tostring(readPath(theme, item.path, item.fallback)), true)
+    end
+
+    syncingTheme = false
+end
+
 local configName = "default"
 local selectedConfig = "--"
 
-ConfigEditor:AddBox({
+ConfigFolder:AddBox({
     text = "Config name",
     flag = "config_name",
     value = configName,
@@ -553,7 +575,7 @@ ConfigEditor:AddBox({
     end
 })
 
-ConfigEditor:AddButton({
+ConfigFolder:AddButton({
     text = "Create config",
     callback = function()
         local ok, result = Library:SaveConfig(configName)
@@ -562,9 +584,9 @@ ConfigEditor:AddButton({
     end
 })
 
-local autoloadLabel = ConfigFiles:AddLabel({ text = "Autoload config: none" })
+local autoloadLabel = ConfigFolder:AddLabel({ text = "Autoload config: none" })
 
-local configList = ConfigFiles:AddList({
+local configList = ConfigFolder:AddList({
     text = "Configs",
     flag = "config_list",
     value = "--",
@@ -601,7 +623,7 @@ refreshConfigList = function(preferred)
     end
 end
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Load config",
     callback = function()
         local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
@@ -613,7 +635,7 @@ ConfigFiles:AddButton({
     end
 })
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Overwrite config",
     callback = function()
         local name = selectedName(selectedConfig, configName, "default")
@@ -623,7 +645,7 @@ ConfigFiles:AddButton({
     end
 })
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Delete config",
     callback = function()
         local name = selectedName(selectedConfig, configName, "default")
@@ -633,7 +655,7 @@ ConfigFiles:AddButton({
     end
 })
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Refresh list",
     callback = function()
         refreshConfigList(selectedConfig)
@@ -641,7 +663,7 @@ ConfigFiles:AddButton({
     end
 })
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Set as autoload",
     callback = function()
         local ok, result = Library:SetAutoloadConfig(selectedName(selectedConfig, configName, "default"))
@@ -650,7 +672,7 @@ ConfigFiles:AddButton({
     end
 })
 
-ConfigFiles:AddButton({
+ConfigFolder:AddButton({
     text = "Reset autoload",
     callback = function()
         local ok, result = Library:ResetAutoloadConfig()

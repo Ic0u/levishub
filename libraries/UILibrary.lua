@@ -6,6 +6,12 @@ local MAX_DRAG_ROTATION = 18
 local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
 local DEFAULT_FOLDER_ICON = "rbxassetid://4918373417"
 local DEFAULT_TOGGLE_ICON = "rbxassetid://4919148038"
+local ACCENT_LINKED_THEME_PATHS = {
+    "TopBar.Line.SecondColor",
+    "Toggle.OnColor",
+    "Button.Color.SecondColor",
+    "Slider.Color2"
+}
 
 local function cloneValue(value)
     if typeof(value) == "Color3" then
@@ -76,6 +82,10 @@ local DEFAULT_THEME = {
     },
     Divider = {
         Color = Color3.fromRGB(50, 50, 50)
+    },
+    Cursor = {
+        Enabled = false,
+        Image = ""
     }
 }
 
@@ -211,6 +221,14 @@ local function setThemePath(target, path, value)
     current[path[#path]] = value
 end
 
+local function splitThemePath(path)
+    local keys = {}
+    for key in tostring(path or ""):gmatch("[^%.]+") do
+        table.insert(keys, key)
+    end
+    return keys
+end
+
 local function readThemePath(theme, path, fallback)
     local current = theme
     for key in tostring(path or ""):gmatch("[^%.]+") do
@@ -220,6 +238,17 @@ local function readThemePath(theme, path, fallback)
         current = current[key]
     end
     return current == nil and fallback or current
+end
+
+local function hasThemePath(theme, path)
+    local current = theme
+    for key in tostring(path or ""):gmatch("[^%.]+") do
+        if type(current) ~= "table" or current[key] == nil then
+            return false
+        end
+        current = current[key]
+    end
+    return true
 end
 
 local function readThemeColor(theme, path, fallback)
@@ -262,6 +291,31 @@ local function firstValue(...)
     end
 end
 
+local function colorsMatch(a, b)
+    a = tableToColor(a)
+    b = tableToColor(b)
+    if not a or not b then
+        return false
+    end
+    return math.abs(a.R - b.R) < 0.001
+        and math.abs(a.G - b.G) < 0.001
+        and math.abs(a.B - b.B) < 0.001
+end
+
+local function syncAccentLinkedColors(theme, oldAccent, newAccent, incoming)
+    newAccent = tableToColor(newAccent)
+    if not newAccent then return end
+
+    for _, path in next, ACCENT_LINKED_THEME_PATHS do
+        if not incoming or not hasThemePath(incoming, path) then
+            local current = readThemePath(theme, path)
+            if colorsMatch(current, oldAccent) or colorsMatch(current, DEFAULT_ACCENT) then
+                setThemePath(theme, splitThemePath(path), newAccent)
+            end
+        end
+    end
+end
+
 local function normalizeOnOff(value)
     if type(value) ~= "table" then
         return nil
@@ -285,6 +339,36 @@ local function normalizeThemeInput(theme)
     end
     assignAlias(output, { "Accent" }, theme.accent)
     assignAlias(output, { "Font" }, theme.font)
+
+    assignAlias(output, { "TopBar", "Line", "Gradient" }, theme.TopBar_Gradient)
+    assignAlias(output, { "TopBar", "Line", "MainColor" }, theme.TopBar_MainColor)
+    assignAlias(output, { "TopBar", "Line", "SecondColor" }, theme.TopBar_SecondaryColor or theme.TopBar_SecondColor)
+    assignAlias(output, { "TopBar", "TextColor" }, theme.TopBar_TextColor)
+    assignAlias(output, { "TopBar", "OnOffColor", "On" }, theme.TopBar_OnColor)
+    assignAlias(output, { "TopBar", "OnOffColor", "Off" }, theme.TopBar_OffColor)
+
+    assignAlias(output, { "Folder", "TextColor" }, theme.Folder_TextColor)
+    assignAlias(output, { "Folder", "OnOff", "On" }, theme.Folder_OnColor)
+    assignAlias(output, { "Folder", "OnOff", "Off" }, theme.Folder_OffColor)
+    assignAlias(output, { "Folder", "OnOff", "Icon" }, theme.Folder_Icon)
+
+    assignAlias(output, { "Text", "Color" }, theme.Label_Color)
+    assignAlias(output, { "Toggle", "Icon" }, theme.Toggle_Icon)
+    assignAlias(output, { "Toggle", "StrokeColor" }, theme.Toggle_StrokeColor)
+    assignAlias(output, { "Toggle", "OnColor" }, theme.Toggle_OnColor)
+    assignAlias(output, { "Toggle", "OffColor" }, theme.Toggle_OffColor)
+    assignAlias(output, { "Toggle", "HoverColor" }, theme.Toggle_HoverColor)
+    assignAlias(output, { "Button", "TextColor" }, theme.Button_TextColor)
+    assignAlias(output, { "Button", "Color", "Gradient" }, theme.Button_Gradient)
+    assignAlias(output, { "Button", "Color", "MainColor" }, theme.Button_MainColor)
+    assignAlias(output, { "Button", "Color", "SecondColor" }, theme.Button_SecondaryColor or theme.Button_SecondColor)
+    assignAlias(output, { "Button", "Color", "HoverColor" }, theme.Button_HoverColor)
+    assignAlias(output, { "TextBox", "MainColor" }, theme.Textbox_MainColor or theme.TextBox_MainColor)
+    assignAlias(output, { "Slider", "BackgroundColor" }, theme.Slider_BackgroundColor or theme.Slider_BackGroundColor)
+    assignAlias(output, { "Slider", "Color2" }, theme.Slider_Color2)
+    assignAlias(output, { "Divider", "Color" }, theme.Divider_Color)
+    assignAlias(output, { "Cursor", "Enabled" }, theme.Cursor_Enabled or theme.CustomCursor_Enabled)
+    assignAlias(output, { "Cursor", "Image" }, theme.Cursor_Image or theme.CustomCursor_Image or theme.Cursor_Id or theme.CustomCursor_Id)
 
     local topBar = theme.TopBar
     if type(topBar) == "table" then
@@ -361,6 +445,12 @@ local function normalizeThemeInput(theme)
         assignAlias(output, { "Divider", "Color" }, divider.Color or divider.Divider_Color)
     end
 
+    local cursor = theme.Cursor or theme.CustomCursor
+    if type(cursor) == "table" then
+        assignAlias(output, { "Cursor", "Enabled" }, firstValue(cursor.Enabled, cursor.enabled))
+        assignAlias(output, { "Cursor", "Image" }, cursor.Image or cursor.image or cursor.Id or cursor.id)
+    end
+
     return output
 end
 
@@ -378,7 +468,7 @@ local function mergeThemeValue(target, source)
             elseif type(current) == "boolean" then
                 target[key] = value == true
             elseif type(current) == "string" then
-                if key == "Icon" then
+                if key == "Icon" or key == "Image" then
                     local fallback = current ~= "" and current or nil
                     target[key] = normalizeAssetId(value, fallback)
                 else
@@ -733,7 +823,10 @@ function library:ApplyTheme()
 
     local aliveCount = 0
     for _, item in next, self.themeObjects do
-        if item.object and item.object.Parent then
+        local ok, parent = pcall(function()
+            return item.object.Parent
+        end)
+        if item.object and ok and parent then
             aliveCount = aliveCount + 1
             self.themeObjects[aliveCount] = item
             pcall(function()
@@ -748,7 +841,12 @@ end
 
 function library:SetTheme(theme)
     theme = normalizeThemeInput(theme)
+    local oldAccent = self.theme.Accent
+    local incomingAccent = tableToColor(theme.Accent)
     mergeThemeValue(self.theme, theme)
+    if incomingAccent then
+        syncAccentLinkedColors(self.theme, oldAccent, self.theme.Accent, theme)
+    end
 
     local font = theme.Font or theme.font
     if font then
@@ -757,6 +855,16 @@ function library:SetTheme(theme)
         else
             self:SetFont(tostring(font))
         end
+    end
+
+    local hasCursorImage = hasThemePath(theme, "Cursor.Image")
+    local hasCursorEnabled = hasThemePath(theme, "Cursor.Enabled")
+    local cursorEnabled = readThemeBool(self.theme, "Cursor.Enabled", false)
+    if hasCursorImage then
+        self:SetCustomCursor(readThemeString(self.theme, "Cursor.Image", ""))
+    end
+    if hasCursorEnabled then
+        self:SetCustomCursorEnabled(cursorEnabled)
     end
     self:ApplyTheme()
 end
@@ -822,11 +930,16 @@ end
 function library:ResetTheme()
     self.theme = cloneValue(self.defaultTheme)
     self:ResetFont()
+    self:SetCustomCursor("")
+    self:SetCustomCursorEnabled(false)
     self:ApplyTheme()
 end
 
 function library:SetCustomCursor(imageId)
     self.customCursorId = normalizeCursorImage(imageId)
+    if self.theme and self.theme.Cursor then
+        self.theme.Cursor.Image = self.customCursorId
+    end
     if self.cursorImage then
         self.cursorImage.Image = self.customCursorId
     end
@@ -836,6 +949,9 @@ end
 
 function library:SetCustomCursorEnabled(enabled)
     self.customCursorEnabled = enabled == true
+    if self.theme and self.theme.Cursor then
+        self.theme.Cursor.Enabled = self.customCursorEnabled
+    end
     local showCustomCursor = self.customCursorEnabled and self.customCursorId ~= ""
 
     if self.cursor then
@@ -1223,6 +1339,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
     closeHolder.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             parentTable.open = not parentTable.open
+            library:ApplyTheme()
             tweenService:Create(close, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                 { Rotation = parentTable.open and 90 or 180, ImageColor3 = closeColor(library.theme) }):Play()
             if subHolder then
