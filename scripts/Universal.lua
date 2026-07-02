@@ -170,6 +170,17 @@ MainWindow:AddColor({
     end
 })
 
+MainWindow:AddButton({
+    text = "Notify",
+    callback = function()
+        Library:Notify({
+            Title = "Levis Hub",
+            Text = "Notification system ready",
+            Duration = 4
+        })
+    end
+})
+
 local refreshThemeList = function() end
 local refreshConfigList = function() end
 local syncThemeControls = function() end
@@ -293,8 +304,21 @@ local themeColor = ThemeFolder:AddColor({
     end
 })
 
-local fontValues = {
-    "Default",
+local function hasFont(fontName)
+    local ok, enumFont = pcall(function()
+        return Enum.Font[fontName]
+    end)
+    return ok and typeof(enumFont) == "EnumItem" and enumFont.EnumType == Enum.Font
+end
+
+local function addFontOption(values, fontName)
+    if not table.find(values, fontName) then
+        table.insert(values, fontName)
+    end
+end
+
+local fontValues = { "Default" }
+local fontCandidates = {
     "Legacy",
     "Arial",
     "ArialBold",
@@ -311,9 +335,12 @@ local fontValues = {
     "BuilderSansMedium",
     "BuilderSansBold",
     "BuilderSansExtraBold",
+    "Inter",
+    "Poppins",
     "Arimo",
     "ArimoBold",
     "Code",
+    "Monospace",
     "Roboto",
     "RobotoCondensed",
     "RobotoMono",
@@ -349,6 +376,16 @@ local fontValues = {
     "TitilliumWeb"
 }
 
+for _, fontName in next, fontCandidates do
+    if fontName == "Monospace" then
+        if hasFont("RobotoMono") or hasFont("Code") then
+            addFontOption(fontValues, fontName)
+        end
+    elseif hasFont(fontName) then
+        addFontOption(fontValues, fontName)
+    end
+end
+
 local themeFont = ThemeFolder:AddList({
     text = "Font",
     flag = "ui_font",
@@ -357,7 +394,12 @@ local themeFont = ThemeFolder:AddList({
     skipConfig = true,
     callback = function(fontName)
         if syncingTheme then return end
-        local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(fontName)
+        local resolvedFont = fontName
+        if fontName == "Monospace" then
+            resolvedFont = hasFont("RobotoMono") and "RobotoMono" or "Code"
+        end
+
+        local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(resolvedFont)
         setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
     end
 })

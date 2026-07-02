@@ -106,6 +106,7 @@ local library = {
     theme = cloneValue(DEFAULT_THEME),
     defaultTheme = cloneValue(DEFAULT_THEME),
     themeObjects = {},
+    notifications = {},
     liveAccentThemes = true
 }
 
@@ -1272,6 +1273,224 @@ function library:LoadAutoloadConfig()
         return false, "autoload config not set"
     end
     return self:LoadConfig(name)
+end
+
+function library:LayoutNotifications()
+    self.notifications = self.notifications or {}
+
+    local visibleIndex = 0
+    for _, record in ipairs(self.notifications) do
+        if record.frame and record.frame.Parent and not record.closed then
+            visibleIndex = visibleIndex + 1
+            local target = UDim2.new(1, -12, 1, -12 - ((visibleIndex - 1) * 86))
+            tweenService:Create(record.frame, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Position = target
+            }):Play()
+        end
+    end
+end
+
+function library:DismissNotification(record)
+    if not record or record.closed then return false end
+    record.closed = true
+
+    for index, item in ipairs(self.notifications) do
+        if item == record then
+            table.remove(self.notifications, index)
+            break
+        end
+    end
+
+    self:LayoutNotifications()
+
+    if record.frame and record.frame.Parent then
+        tweenService:Create(record.frame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(1, 300, record.frame.Position.Y.Scale, record.frame.Position.Y.Offset),
+            BackgroundTransparency = 1
+        }):Play()
+
+        for _, object in next, record.frame:GetDescendants() do
+            if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                tweenService:Create(object, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    TextTransparency = 1
+                }):Play()
+            elseif object:IsA("Frame") then
+                tweenService:Create(object, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    BackgroundTransparency = 1
+                }):Play()
+            elseif object:IsA("UIStroke") then
+                tweenService:Create(object, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Transparency = 1
+                }):Play()
+            end
+        end
+
+        delay(0.2, function()
+            if record.frame then
+                pcall(function()
+                    record.frame:Destroy()
+                end)
+            end
+        end)
+    end
+
+    return true
+end
+
+function library:ClearNotifications()
+    for _, record in next, self.notifications or {} do
+        record.closed = true
+        if record.frame then
+            pcall(function()
+                record.frame:Destroy()
+            end)
+        end
+    end
+    self.notifications = {}
+end
+
+function library:Notify(message, duration, title)
+    if type(message) == "table" then
+        local payload = message
+        title = payload.Title or payload.title or title
+        duration = payload.Duration or payload.duration or duration
+        message = payload.Text or payload.text or payload.Message or payload.message
+    end
+
+    if not self.base then
+        return false, "library not initialized"
+    end
+
+    message = tostring(message or "Empty")
+    title = tostring(title or self.title or "Levis Hub")
+    duration = math.max(tonumber(duration) or 3, 1)
+    self.notifications = self.notifications or {}
+
+    local frame = self:Create("Frame", {
+        ZIndex = 220,
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, 300, 1, -12),
+        Size = UDim2.new(0, 260, 0, 78),
+        BackgroundColor3 = Color3.fromRGB(18, 18, 18),
+        BackgroundTransparency = 1,
+        BorderColor3 = Color3.fromRGB(0, 0, 0),
+        Parent = self.base
+    })
+
+    local stroke = self:Create("UIStroke", {
+        Thickness = 1,
+        Color = Color3.fromRGB(45, 45, 45),
+        Transparency = 1,
+        Parent = frame
+    })
+
+    local titleLabel = self:Create("TextLabel", {
+        ZIndex = 221,
+        Position = UDim2.new(0, 8, 0, 4),
+        Size = UDim2.new(1, -16, 0, 18),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextColor3 = getAccent(),
+        TextTransparency = 1,
+        TextSize = 14,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = frame
+    })
+    self:RegisterThemeObject(titleLabel, "TextColor3", function(theme)
+        return theme.Accent or DEFAULT_ACCENT
+    end)
+
+    local messageLabel = self:Create("TextLabel", {
+        ZIndex = 221,
+        Position = UDim2.new(0, 8, 0, 24),
+        Size = UDim2.new(1, -16, 0, 40),
+        BackgroundTransparency = 1,
+        Text = message,
+        TextColor3 = Color3.fromRGB(245, 245, 245),
+        TextTransparency = 1,
+        TextSize = 15,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Parent = frame
+    })
+    self:RegisterThemeObject(messageLabel, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(245, 245, 245))
+    end)
+
+    local progressBack = self:Create("Frame", {
+        ZIndex = 221,
+        Position = UDim2.new(0, 8, 1, -8),
+        Size = UDim2.new(1, -16, 0, 2),
+        BackgroundColor3 = Color3.fromRGB(40, 40, 40),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = frame
+    })
+
+    local progress = self:Create("Frame", {
+        ZIndex = 222,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = getAccent(),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = progressBack
+    })
+    self:RegisterThemeObject(progress, "BackgroundColor3", function(theme)
+        return theme.Accent or DEFAULT_ACCENT
+    end)
+
+    local record = {
+        frame = frame
+    }
+    table.insert(self.notifications, 1, record)
+
+    while #self.notifications > 5 do
+        self:DismissNotification(self.notifications[#self.notifications])
+    end
+
+    self:LayoutNotifications()
+
+    tweenService:Create(frame, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0
+    }):Play()
+    tweenService:Create(stroke, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Transparency = 0
+    }):Play()
+    tweenService:Create(titleLabel, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.08), {
+        TextTransparency = 0
+    }):Play()
+    tweenService:Create(messageLabel, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.1), {
+        TextTransparency = 0
+    }):Play()
+    tweenService:Create(progressBack, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.12), {
+        BackgroundTransparency = 0
+    }):Play()
+    tweenService:Create(progress, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.12), {
+        BackgroundTransparency = 0
+    }):Play()
+    tweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 0, 1, 0)
+    }):Play()
+
+    delay(duration, function()
+        if self and record and not record.closed then
+            self:DismissNotification(record)
+        end
+    end)
+
+    return true, record
+end
+
+function library:SendNotification(duration, message)
+    return self:Notify(message, duration)
+end
+
+function library:Notification(message, duration, title)
+    return self:Notify(message, duration, title)
 end
 
 local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
@@ -3448,6 +3667,7 @@ function library:Destroy()
     self.open = false
     self.isAnimating = false
     cancelDrag()
+    self:ClearNotifications()
 
     if self.activePopup then
         pcall(function()
@@ -3472,6 +3692,7 @@ function library:Destroy()
     self._fadeDefaults = nil
     self.themeObjects = {}
     self.originalFonts = {}
+    self.notifications = {}
 
     pcall(function()
         inputService.MouseIconEnabled = true
