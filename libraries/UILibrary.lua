@@ -4,6 +4,81 @@ local DRAG_LERP_SPEED = 0.16
 local DRAG_TILT_MULTIPLIER = 0.026
 local MAX_DRAG_ROTATION = 18
 local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
+local DEFAULT_FOLDER_ICON = "rbxassetid://4918373417"
+local DEFAULT_TOGGLE_ICON = "rbxassetid://4919148038"
+
+local function cloneValue(value)
+    if typeof(value) == "Color3" then
+        return Color3.new(value.R, value.G, value.B)
+    end
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local clone = {}
+    for key, item in next, value do
+        clone[key] = cloneValue(item)
+    end
+    return clone
+end
+
+local DEFAULT_THEME = {
+    Theme = {
+        Name = "default",
+        Creator = ""
+    },
+    Accent = DEFAULT_ACCENT,
+    TopBar = {
+        Line = {
+            Gradient = false,
+            MainColor = Color3.fromRGB(10, 10, 10),
+            SecondColor = DEFAULT_ACCENT
+        },
+        TextColor = Color3.fromRGB(255, 255, 255),
+        OnOffColor = {
+            On = Color3.fromRGB(50, 50, 50),
+            Off = Color3.fromRGB(30, 30, 30)
+        }
+    },
+    Folder = {
+        TextColor = Color3.fromRGB(255, 255, 255),
+        OnOff = {
+            On = Color3.fromRGB(50, 50, 50),
+            Off = Color3.fromRGB(30, 30, 30),
+            Icon = DEFAULT_FOLDER_ICON
+        }
+    },
+    Text = {
+        Color = Color3.fromRGB(255, 255, 255)
+    },
+    Toggle = {
+        Icon = DEFAULT_TOGGLE_ICON,
+        StrokeColor = Color3.fromRGB(100, 100, 100),
+        OnColor = DEFAULT_ACCENT,
+        OffColor = Color3.fromRGB(20, 20, 20),
+        HoverColor = Color3.fromRGB(140, 140, 140)
+    },
+    Button = {
+        TextColor = Color3.fromRGB(255, 255, 255),
+        Color = {
+            Gradient = false,
+            MainColor = Color3.fromRGB(40, 40, 40),
+            SecondColor = DEFAULT_ACCENT,
+            HoverColor = Color3.fromRGB(60, 60, 60)
+        }
+    },
+    TextBox = {
+        MainColor = Color3.fromRGB(20, 20, 20)
+    },
+    Slider = {
+        BackgroundColor = Color3.fromRGB(30, 30, 30),
+        Color2 = DEFAULT_ACCENT
+    },
+    Divider = {
+        Color = Color3.fromRGB(50, 50, 50)
+    }
+}
+
 local library = {
     flags = {},
     windows = {},
@@ -17,12 +92,8 @@ local library = {
     originalFonts = {},
     customCursorEnabled = false,
     customCursorId = "",
-    theme = {
-        Accent = DEFAULT_ACCENT
-    },
-    defaultTheme = {
-        Accent = DEFAULT_ACCENT
-    },
+    theme = cloneValue(DEFAULT_THEME),
+    defaultTheme = cloneValue(DEFAULT_THEME),
     themeObjects = {},
     liveAccentThemes = true
 }
@@ -115,6 +186,244 @@ local function tableToColor(value)
             return Color3.fromRGB(math.clamp(r, 0, 255), math.clamp(g, 0, 255), math.clamp(b, 0, 255))
         end
     end
+end
+
+local function normalizeAssetId(imageId, fallback)
+    imageId = tostring(imageId or ""):gsub("%s+", "")
+    if imageId == "" then
+        return fallback or ""
+    end
+    if imageId:match("^rbxassetid://") or imageId:match("^http") then
+        return imageId
+    end
+
+    local digits = imageId:match("%d+")
+    return digits and ("rbxassetid://" .. digits) or imageId
+end
+
+local function setThemePath(target, path, value)
+    local current = target
+    for index = 1, #path - 1 do
+        local key = path[index]
+        current[key] = type(current[key]) == "table" and current[key] or {}
+        current = current[key]
+    end
+    current[path[#path]] = value
+end
+
+local function readThemePath(theme, path, fallback)
+    local current = theme
+    for key in tostring(path or ""):gmatch("[^%.]+") do
+        if type(current) ~= "table" or current[key] == nil then
+            return fallback
+        end
+        current = current[key]
+    end
+    return current == nil and fallback or current
+end
+
+local function readThemeColor(theme, path, fallback)
+    return tableToColor(readThemePath(theme, path, fallback)) or fallback
+end
+
+local function readThemeBool(theme, path, fallback)
+    local value = readThemePath(theme, path, fallback)
+    return value == true
+end
+
+local function readThemeString(theme, path, fallback)
+    local value = readThemePath(theme, path, fallback)
+    if value == nil then
+        return fallback or ""
+    end
+    return tostring(value)
+end
+
+local function getThemeColor(path, fallback)
+    return readThemeColor(library.theme, path, fallback)
+end
+
+local function getThemeString(path, fallback)
+    return readThemeString(library.theme, path, fallback)
+end
+
+local function assignAlias(output, path, value)
+    if value ~= nil then
+        setThemePath(output, path, value)
+    end
+end
+
+local function firstValue(...)
+    for index = 1, select("#", ...) do
+        local value = select(index, ...)
+        if value ~= nil then
+            return value
+        end
+    end
+end
+
+local function normalizeOnOff(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+    return {
+        On = value.On or value.on,
+        Off = value.Off or value.off,
+        Icon = value.Icon or value.icon
+    }
+end
+
+local function normalizeThemeInput(theme)
+    if type(theme) ~= "table" then
+        return {}
+    end
+
+    local output = cloneValue(theme)
+
+    if type(theme.Theme) == "table" then
+        assignAlias(output, { "Theme", "Creator" }, theme.Theme.Creator or theme.Theme.Creater)
+    end
+    assignAlias(output, { "Accent" }, theme.accent)
+    assignAlias(output, { "Font" }, theme.font)
+
+    local topBar = theme.TopBar
+    if type(topBar) == "table" then
+        local line = topBar.Line or topBar.line
+        if type(line) == "table" then
+            assignAlias(output, { "TopBar", "Line", "Gradient" }, firstValue(line.Gradient, line.gradient))
+            assignAlias(output, { "TopBar", "Line", "MainColor" }, line.MainColor or line.Main_Color)
+            assignAlias(output, { "TopBar", "Line", "SecondColor" }, line.SecondColor or line.Second_Color or line.SecondaryColor)
+        end
+
+        assignAlias(output, { "TopBar", "TextColor" }, topBar.TextColor or topBar.Text_Color)
+        local onOffColor = normalizeOnOff(topBar.OnOffColor or topBar.On_Off_Color)
+        if onOffColor then
+            assignAlias(output, { "TopBar", "OnOffColor", "On" }, onOffColor.On)
+            assignAlias(output, { "TopBar", "OnOffColor", "Off" }, onOffColor.Off)
+        end
+    end
+
+    local folder = theme.Folder
+    if type(folder) == "table" then
+        assignAlias(output, { "Folder", "TextColor" }, folder.TextColor or folder.Text_Color)
+        local onOff = normalizeOnOff(folder.OnOff or folder.On_Off)
+        if onOff then
+            assignAlias(output, { "Folder", "OnOff", "On" }, onOff.On)
+            assignAlias(output, { "Folder", "OnOff", "Off" }, onOff.Off)
+            assignAlias(output, { "Folder", "OnOff", "Icon" }, onOff.Icon)
+        end
+    end
+
+    local label = theme.Label
+    if type(label) == "table" then
+        assignAlias(output, { "Text", "Color" }, label.Color or label.Label_Color)
+    end
+
+    local text = theme.Text
+    if type(text) == "table" then
+        assignAlias(output, { "Text", "Color" }, text.Color)
+    end
+
+    local toggle = theme.Toggle
+    if type(toggle) == "table" then
+        assignAlias(output, { "Toggle", "Icon" }, toggle.Icon or toggle.icon)
+        assignAlias(output, { "Toggle", "StrokeColor" }, toggle.StrokeColor or toggle.Stroke_Color)
+        assignAlias(output, { "Toggle", "OnColor" }, toggle.OnColor or toggle.On_Color)
+        assignAlias(output, { "Toggle", "OffColor" }, toggle.OffColor or toggle.Off_Color)
+        assignAlias(output, { "Toggle", "HoverColor" }, toggle.HoverColor or toggle.Hover_Color)
+    end
+
+    local button = theme.Button
+    if type(button) == "table" then
+        assignAlias(output, { "Button", "TextColor" }, button.TextColor or button.Text_Color)
+        local color = button.Color or button.color
+        if type(color) == "table" then
+            assignAlias(output, { "Button", "Color", "Gradient" }, firstValue(color.Gradient, color.gradient))
+            assignAlias(output, { "Button", "Color", "MainColor" }, color.MainColor or color.Main_Color)
+            assignAlias(output, { "Button", "Color", "SecondColor" }, color.SecondColor or color.Second_Color or color.SecondaryColor)
+            assignAlias(output, { "Button", "Color", "HoverColor" }, color.HoverColor or color.Hover_Color)
+        end
+    end
+
+    local textBox = theme.TextBox or theme.Textbox
+    if type(textBox) == "table" then
+        assignAlias(output, { "TextBox", "MainColor" }, textBox.MainColor or textBox.Main_Color)
+    end
+
+    local slider = theme.Slider
+    if type(slider) == "table" then
+        assignAlias(output, { "Slider", "BackgroundColor" }, slider.BackgroundColor or slider.BackGround_Color or slider.Background_Color)
+        assignAlias(output, { "Slider", "Color2" }, slider.Color2)
+    end
+
+    local divider = theme.Divider
+    if type(divider) == "table" then
+        assignAlias(output, { "Divider", "Color" }, divider.Color or divider.Divider_Color)
+    end
+
+    return output
+end
+
+local function mergeThemeValue(target, source)
+    for key, value in next, source do
+        local current = target[key]
+        if current ~= nil then
+            if typeof(current) == "Color3" then
+                local color = tableToColor(value)
+                if color then
+                    target[key] = color
+                end
+            elseif type(current) == "table" and type(value) == "table" and not tableToColor(value) then
+                mergeThemeValue(current, value)
+            elseif type(current) == "boolean" then
+                target[key] = value == true
+            elseif type(current) == "string" then
+                if key == "Icon" then
+                    local fallback = current ~= "" and current or nil
+                    target[key] = normalizeAssetId(value, fallback)
+                else
+                    target[key] = tostring(value or "")
+                end
+            elseif type(current) == "number" then
+                target[key] = tonumber(value) or current
+            end
+        end
+    end
+end
+
+local function serializeThemeValue(value)
+    if typeof(value) == "Color3" then
+        return colorToTable(value)
+    end
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local serialized = {}
+    for key, item in next, value do
+        serialized[key] = serializeThemeValue(item)
+    end
+    return serialized
+end
+
+local function createThemeGradient(parent, path, isEnabled)
+    local gradient = library:Create("UIGradient", {
+        Enabled = false,
+        Color = ColorSequence.new(DEFAULT_ACCENT, DEFAULT_ACCENT),
+        Parent = parent
+    })
+
+    library:RegisterThemeObject(gradient, "Enabled", function(theme)
+        local enabled = readThemeBool(theme, path .. ".Gradient", false)
+        return enabled and (not isEnabled or isEnabled())
+    end)
+    library:RegisterThemeObject(gradient, "Color", function(theme)
+        local main = readThemeColor(theme, path .. ".MainColor", DEFAULT_ACCENT)
+        local second = readThemeColor(theme, path .. ".SecondColor", main)
+        return ColorSequence.new(main, second)
+    end)
+
+    return gradient
 end
 
 local function hasFileApi()
@@ -350,16 +659,7 @@ local function deleteSaveFile(path)
 end
 
 local function normalizeCursorImage(imageId)
-    imageId = tostring(imageId or ""):gsub("%s+", "")
-    if imageId == "" then
-        return ""
-    end
-    if imageId:match("^rbxassetid://") or imageId:match("^http") then
-        return imageId
-    end
-
-    local digits = imageId:match("%d+")
-    return digits and ("rbxassetid://" .. digits) or imageId
+    return normalizeAssetId(imageId, "")
 end
 
 local function encodeJson(data)
@@ -447,11 +747,9 @@ function library:ApplyTheme()
 end
 
 function library:SetTheme(theme)
-    theme = typeof(theme) == "table" and theme or {}
-    local accent = tableToColor(theme.Accent or theme.accent)
-    if accent then
-        self.theme.Accent = accent
-    end
+    theme = normalizeThemeInput(theme)
+    mergeThemeValue(self.theme, theme)
+
     local font = theme.Font or theme.font
     if font then
         if tostring(font) == "Default" then
@@ -464,10 +762,20 @@ function library:SetTheme(theme)
 end
 
 function library:GetTheme()
-    return {
-        Accent = self.theme.Accent,
-        Font = self.fontOverride and self.font.Name or "Default"
-    }
+    local theme = cloneValue(self.theme)
+    theme.Font = self.fontOverride and self.font.Name or "Default"
+    return theme
+end
+
+function library:SetThemeInfo(info)
+    info = type(info) == "table" and info or {}
+    self:SetTheme({
+        Theme = {
+            Name = info.Name or info.name or self.theme.Theme.Name,
+            Creator = info.Creator or info.Creater or info.creator or self.theme.Theme.Creator
+        }
+    })
+    return true
 end
 
 function library:SetFont(font)
@@ -512,10 +820,9 @@ function library:ResetFont()
 end
 
 function library:ResetTheme()
-    self:SetTheme({
-        Accent = self.defaultTheme.Accent,
-        Font = "Default"
-    })
+    self.theme = cloneValue(self.defaultTheme)
+    self:ResetFont()
+    self:ApplyTheme()
 end
 
 function library:SetCustomCursor(imageId)
@@ -545,14 +852,17 @@ function library:SetCustomCursorEnabled(enabled)
     return true
 end
 
-function library:SaveTheme(name)
+function library:SaveTheme(name, info)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
 
-    local encoded = encodeJson({
-        Accent = colorToTable(self.theme.Accent),
-        Font = self.fontOverride and self.font.Name or "Default"
-    })
+    if info then
+        self:SetThemeInfo(info)
+    elseif name and self.theme.Theme then
+        self.theme.Theme.Name = displaySaveName(name)
+    end
+
+    local encoded = encodeJson(serializeThemeValue(self:GetTheme()))
     if not encoded then
         return false, "failed to encode theme"
     end
@@ -658,10 +968,7 @@ function library:SaveConfig(name)
 
     local encoded = encodeJson({
         flags = values,
-        theme = {
-            Accent = colorToTable(self.theme.Accent),
-            Font = self.fontOverride and self.font.Name or "Default"
-        }
+        theme = serializeThemeValue(self:GetTheme())
     })
     if not encoded then
         return false, "failed to encode config"
@@ -777,6 +1084,18 @@ end
 
 local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
     local size = subHolder and 34 or 40
+    local function topBarMainColor(theme)
+        return readThemeColor(theme, "TopBar.Line.MainColor", Color3.fromRGB(10, 10, 10))
+    end
+    local function closeColor(theme)
+        if subHolder then
+            return parentTable.open and readThemeColor(theme, "Folder.OnOff.On", Color3.fromRGB(50, 50, 50)) or
+            readThemeColor(theme, "Folder.OnOff.Off", Color3.fromRGB(30, 30, 30))
+        end
+        return parentTable.open and readThemeColor(theme, "TopBar.OnOffColor.On", Color3.fromRGB(50, 50, 50)) or
+        readThemeColor(theme, "TopBar.OnOffColor.Off", Color3.fromRGB(30, 30, 30))
+    end
+
     parentTable.main = library:Create("ImageButton", {
         LayoutOrder = subHolder and parentTable.position or 0,
         Position = parentTable.windowPosition or UDim2.new(0, 20 + (250 * (parentTable.position or 0)), 0, 20),
@@ -797,13 +1116,16 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
             Size = UDim2.new(1, 0, 0, size),
             BackgroundTransparency = 1,
             Image = "rbxassetid://3570695787",
-            ImageColor3 = parentTable.open and (subHolder and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10)) or
-            (subHolder and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(6, 6, 6)),
+            ImageColor3 = topBarMainColor(library.theme),
             ScaleType = Enum.ScaleType.Slice,
             SliceCenter = Rect.new(100, 100, 100, 100),
             SliceScale = 0.04,
             Parent = parentTable.main
         })
+        createThemeGradient(round, "TopBar.Line")
+        library:RegisterThemeObject(round, "ImageColor3", function(theme)
+            return topBarMainColor(theme)
+        end)
     end
 
     local title = library:Create("TextLabel", {
@@ -819,6 +1141,12 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Parent = parentTable.main
     })
     parentTable.topBar = title
+    library:RegisterThemeObject(title, "TextColor3", function(theme)
+        if subHolder then
+            return readThemeColor(theme, "Folder.TextColor", Color3.fromRGB(255, 255, 255))
+        end
+        return readThemeColor(theme, "TopBar.TextColor", Color3.fromRGB(255, 255, 255))
+    end)
 
     local closeHolder = library:Create("Frame", {
         Position = UDim2.new(1, 0, 0, 0),
@@ -834,11 +1162,19 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Size = UDim2.new(1, -size - 10, 1, -size - 10),
         Rotation = parentTable.open and 90 or 180,
         BackgroundTransparency = 1,
-        Image = "rbxassetid://4918373417",
-        ImageColor3 = parentTable.open and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(30, 30, 30),
+        Image = subHolder and normalizeAssetId(getThemeString("Folder.OnOff.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON) or DEFAULT_FOLDER_ICON,
+        ImageColor3 = closeColor(library.theme),
         ScaleType = Enum.ScaleType.Fit,
         Parent = closeHolder
     })
+    if subHolder then
+        library:RegisterThemeObject(close, "Image", function(theme)
+            return normalizeAssetId(readThemeString(theme, "Folder.OnOff.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON)
+        end)
+    end
+    library:RegisterThemeObject(close, "ImageColor3", function(theme)
+        return closeColor(theme)
+    end)
 
     parentTable.content = library:Create("Frame", {
         Position = UDim2.new(0, 0, 0, size),
@@ -888,15 +1224,14 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             parentTable.open = not parentTable.open
             tweenService:Create(close, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { Rotation = parentTable.open and 90 or 180, ImageColor3 = parentTable.open and
-                Color3.fromRGB(50, 50, 50) or Color3.fromRGB(30, 30, 30) }):Play()
+                { Rotation = parentTable.open and 90 or 180, ImageColor3 = closeColor(library.theme) }):Play()
             if subHolder then
                 tweenService:Create(title, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { BackgroundColor3 = parentTable.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10) })
                     :Play()
             else
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = parentTable.open and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(6, 6, 6) }):Play()
+                    { ImageColor3 = topBarMainColor(library.theme) }):Play()
             end
             parentTable.main:TweenSize(
             #parentTable.options > 0 and parentTable.open and UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or
@@ -923,6 +1258,9 @@ local function createLabel(option, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = parent.content
     })
+    library:RegisterThemeObject(main, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     function option:Set(value)
         self.text = tostring(value)
@@ -950,6 +1288,9 @@ function createToggle(option, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = parent.content
     })
+    library:RegisterThemeObject(main, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local tickboxOutline = library:Create("ImageLabel", {
         Position = UDim2.new(1, -6, 0, 4),
@@ -957,7 +1298,7 @@ function createToggle(option, parent)
         SizeConstraint = Enum.SizeConstraint.RelativeYY,
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and getAccent() or Color3.fromRGB(100, 100, 100),
+        ImageColor3 = option.state and getThemeColor("Toggle.OnColor", getAccent()) or getThemeColor("Toggle.StrokeColor", Color3.fromRGB(100, 100, 100)),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -969,7 +1310,7 @@ function createToggle(option, parent)
         Size = UDim2.new(1, -4, 1, -4),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = option.state and getAccent() or Color3.fromRGB(20, 20, 20),
+        ImageColor3 = option.state and getThemeColor("Toggle.OnColor", getAccent()) or getThemeColor("Toggle.OffColor", Color3.fromRGB(20, 20, 20)),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -988,17 +1329,25 @@ function createToggle(option, parent)
         Size = UDim2.new(1, 0, 1, 0),
         SizeConstraint = Enum.SizeConstraint.RelativeYY,
         BackgroundTransparency = 1,
-        Image = "rbxassetid://4919148038",
+        Image = normalizeAssetId(getThemeString("Toggle.Icon", DEFAULT_TOGGLE_ICON), DEFAULT_TOGGLE_ICON),
         ImageColor3 = Color3.fromRGB(20, 20, 20),
         Parent = checkmarkHolder
     })
 
     local inContact
     library:RegisterThemeObject(tickboxOutline, "ImageColor3", function(theme)
-        return option.state and theme.Accent or Color3.fromRGB(100, 100, 100)
+        if option.state then
+            return readThemeColor(theme, "Toggle.OnColor", theme.Accent or DEFAULT_ACCENT)
+        end
+        return inContact and readThemeColor(theme, "Toggle.HoverColor", Color3.fromRGB(140, 140, 140)) or
+        readThemeColor(theme, "Toggle.StrokeColor", Color3.fromRGB(100, 100, 100))
     end)
     library:RegisterThemeObject(tickboxInner, "ImageColor3", function(theme)
-        return option.state and theme.Accent or Color3.fromRGB(20, 20, 20)
+        return option.state and readThemeColor(theme, "Toggle.OnColor", theme.Accent or DEFAULT_ACCENT) or
+        readThemeColor(theme, "Toggle.OffColor", Color3.fromRGB(20, 20, 20))
+    end)
+    library:RegisterThemeObject(checkmark, "Image", function(theme)
+        return normalizeAssetId(readThemeString(theme, "Toggle.Icon", DEFAULT_TOGGLE_ICON), DEFAULT_TOGGLE_ICON)
     end)
 
     main.InputBegan:connect(function(input)
@@ -1009,17 +1358,17 @@ function createToggle(option, parent)
             inContact = true
             if not option.state then
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(140, 140, 140) }):Play()
+                    { ImageColor3 = getThemeColor("Toggle.HoverColor", Color3.fromRGB(140, 140, 140)) }):Play()
             end
         end
     end)
 
     main.InputEnded:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
-            inContact = true
+            inContact = false
             if not option.state then
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
+                    { ImageColor3 = getThemeColor("Toggle.StrokeColor", Color3.fromRGB(100, 100, 100)) }):Play()
             end
         end
     end)
@@ -1030,17 +1379,17 @@ function createToggle(option, parent)
         checkmarkHolder:TweenSize(option.state and UDim2.new(1, -8, 1, -8) or UDim2.new(0, 0, 1, -8), "Out", "Quad", 0.2,
             true)
         tweenService:Create(tickboxInner, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { ImageColor3 = state and getAccent() or Color3.fromRGB(20, 20, 20) }):Play()
+            { ImageColor3 = state and getThemeColor("Toggle.OnColor", getAccent()) or getThemeColor("Toggle.OffColor", Color3.fromRGB(20, 20, 20)) }):Play()
         if state then
             tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = getAccent() }):Play()
+                { ImageColor3 = getThemeColor("Toggle.OnColor", getAccent()) }):Play()
         else
             if inContact then
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(140, 140, 140) }):Play()
+                    { ImageColor3 = getThemeColor("Toggle.HoverColor", Color3.fromRGB(140, 140, 140)) }):Play()
             else
                 tweenService:Create(tickboxOutline, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
+                    { ImageColor3 = getThemeColor("Toggle.StrokeColor", Color3.fromRGB(100, 100, 100)) }):Play()
             end
         end
         self.callback(state)
@@ -1071,6 +1420,9 @@ function createButton(option, parent)
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Parent = parent.content
     })
+    library:RegisterThemeObject(main, "TextColor3", function(theme)
+        return readThemeColor(theme, "Button.TextColor", Color3.fromRGB(255, 255, 255))
+    end)
 
     local round = library:Create("ImageLabel", {
         AnchorPoint = Vector2.new(0.5, 0.5),
@@ -1078,7 +1430,7 @@ function createButton(option, parent)
         Size = UDim2.new(1, -12, 1, -10),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = Color3.fromRGB(40, 40, 40),
+        ImageColor3 = getThemeColor("Button.Color.MainColor", Color3.fromRGB(40, 40, 40)),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -1087,44 +1439,52 @@ function createButton(option, parent)
 
     local inContact
     local clicking
+    createThemeGradient(round, "Button.Color", function()
+        return not inContact and not clicking
+    end)
     library:RegisterThemeObject(round, "ImageColor3", function(theme)
         if clicking then
             return theme.Accent
         end
-        return inContact and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(40, 40, 40)
+        return inContact and readThemeColor(theme, "Button.Color.HoverColor", Color3.fromRGB(60, 60, 60)) or
+        readThemeColor(theme, "Button.Color.MainColor", Color3.fromRGB(40, 40, 40))
     end)
 
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             library.flags[option.flag] = true
             clicking = true
+            library:ApplyTheme()
             tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                 { ImageColor3 = getAccent() }):Play()
             option.callback()
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             inContact = true
+            library:ApplyTheme()
             tweenService:Create(round, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
+                { ImageColor3 = getThemeColor("Button.Color.HoverColor", Color3.fromRGB(60, 60, 60)) }):Play()
         end
     end)
 
     main.InputEnded:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             clicking = false
+            library:ApplyTheme()
             if inContact then
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
+                    { ImageColor3 = getThemeColor("Button.Color.HoverColor", Color3.fromRGB(60, 60, 60)) }):Play()
             else
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(40, 40, 40) }):Play()
+                    { ImageColor3 = getThemeColor("Button.Color.MainColor", Color3.fromRGB(40, 40, 40)) }):Play()
             end
         end
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             inContact = false
             if not clicking then
+                library:ApplyTheme()
                 tweenService:Create(round, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = Color3.fromRGB(40, 40, 40) }):Play()
+                    { ImageColor3 = getThemeColor("Button.Color.MainColor", Color3.fromRGB(40, 40, 40)) }):Play()
             end
         end
     end)
@@ -1148,6 +1508,9 @@ local function createBind(option, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = parent.content
     })
+    library:RegisterThemeObject(main, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local round = library:Create("ImageLabel", {
         Position = UDim2.new(1, -6, 0, 4),
@@ -1171,6 +1534,9 @@ local function createBind(option, parent)
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Parent = round
     })
+    library:RegisterThemeObject(bindinput, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local inContact
     library:RegisterThemeObject(round, "ImageColor3", function(theme)
@@ -1289,13 +1655,16 @@ local function createSlider(option, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = main
     })
+    library:RegisterThemeObject(title, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local slider = library:Create("ImageLabel", {
         Position = UDim2.new(0, 10, 0, 34),
         Size = UDim2.new(1, -20, 0, 5),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = Color3.fromRGB(30, 30, 30),
+        ImageColor3 = getThemeColor("Slider.BackgroundColor", Color3.fromRGB(30, 30, 30)),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -1305,7 +1674,7 @@ local function createSlider(option, parent)
     local fill = library:Create("ImageLabel", {
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = getAccent(),
+        ImageColor3 = getThemeColor("Slider.Color2", getAccent()),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.02,
@@ -1347,6 +1716,9 @@ local function createSlider(option, parent)
         Font = Enum.Font.Gotham,
         Parent = valueRound
     })
+    library:RegisterThemeObject(inputvalue, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(235, 235, 235))
+    end)
 
     if option.min >= 0 then
         fill.Size = UDim2.new((option.value - option.min) / (option.max - option.min), 0, 1, 0)
@@ -1357,19 +1729,25 @@ local function createSlider(option, parent)
 
     local sliding
     local inContact
+    local function sliderColor()
+        return getThemeColor("Slider.Color2", getAccent())
+    end
+    library:RegisterThemeObject(slider, "ImageColor3", function(theme)
+        return readThemeColor(theme, "Slider.BackgroundColor", Color3.fromRGB(30, 30, 30))
+    end)
     library:RegisterThemeObject(fill, "ImageColor3", function(theme)
-        return theme.Accent
+        return readThemeColor(theme, "Slider.Color2", theme.Accent or DEFAULT_ACCENT)
     end)
     library:RegisterThemeObject(circle, "ImageColor3", function(theme)
-        return sliding and theme.Accent or Color3.fromRGB(60, 60, 60)
+        return sliding and readThemeColor(theme, "Slider.Color2", theme.Accent or DEFAULT_ACCENT) or Color3.fromRGB(60, 60, 60)
     end)
 
     main.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { ImageColor3 = getAccent() }):Play()
+                { ImageColor3 = sliderColor() }):Play()
             tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = getAccent() }):Play()
+                { Size = UDim2.new(3.5, 0, 3.5, 0), ImageColor3 = sliderColor() }):Play()
             sliding = true
             option:SetValue(option.min +
             ((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X) * (option.max - option.min))
@@ -1378,7 +1756,7 @@ local function createSlider(option, parent)
             inContact = true
             if not sliding then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = getAccent() }):Play()
+                    { ImageColor3 = sliderColor() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(2.8, 0, 2.8, 0), ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
             end
@@ -1397,12 +1775,12 @@ local function createSlider(option, parent)
             sliding = false
             if inContact then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = getAccent() }):Play()
+                    { ImageColor3 = sliderColor() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(2.8, 0, 2.8, 0), ImageColor3 = Color3.fromRGB(100, 100, 100) }):Play()
             else
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = getAccent() }):Play()
+                    { ImageColor3 = sliderColor() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(0, 0, 0, 0), ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
             end
@@ -1412,7 +1790,7 @@ local function createSlider(option, parent)
             inputvalue:ReleaseFocus()
             if not sliding then
                 tweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { ImageColor3 = getAccent() }):Play()
+                    { ImageColor3 = sliderColor() }):Play()
                 tweenService:Create(circle, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { Size = UDim2.new(0, 0, 0, 0), ImageColor3 = Color3.fromRGB(60, 60, 60) }):Play()
             end
@@ -1477,6 +1855,9 @@ local function createList(option, parent, holder)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = main
     })
+    library:RegisterThemeObject(title, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(140, 140, 140))
+    end)
 
     local listvalue = library:Create("TextLabel", {
         Position = UDim2.new(0, 12, 0, 20),
@@ -1489,6 +1870,9 @@ local function createList(option, parent, holder)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = main
     })
+    library:RegisterThemeObject(listvalue, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     library:Create("ImageLabel", {
         Position = UDim2.new(1, -16, 0, 16),
@@ -1600,6 +1984,9 @@ local function createList(option, parent, holder)
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = content
         })
+        library:RegisterThemeObject(label, "TextColor3", function(theme)
+            return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+        end)
 
         local inContact
         local clicking
@@ -1730,12 +2117,15 @@ local function createBox(option, parent)
         Size = UDim2.new(1, -16, 1, -14),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
-        ImageColor3 = Color3.fromRGB(20, 20, 20),
+        ImageColor3 = getThemeColor("TextBox.MainColor", Color3.fromRGB(20, 20, 20)),
         ScaleType = Enum.ScaleType.Slice,
         SliceCenter = Rect.new(100, 100, 100, 100),
         SliceScale = 0.01,
         Parent = main
     })
+    library:RegisterThemeObject(round, "ImageColor3", function(theme)
+        return readThemeColor(theme, "TextBox.MainColor", Color3.fromRGB(20, 20, 20))
+    end)
 
     local title = library:Create("TextLabel", {
         Position = UDim2.new(0, 12, 0, 8),
@@ -1748,6 +2138,9 @@ local function createBox(option, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = main
     })
+    library:RegisterThemeObject(title, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(100, 100, 100))
+    end)
 
     local inputvalue = library:Create("TextBox", {
         Position = UDim2.new(0, 12, 0, 20),
@@ -1761,6 +2154,9 @@ local function createBox(option, parent)
         TextWrapped = true,
         Parent = main
     })
+    library:RegisterThemeObject(inputvalue, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local inContact
     local focused
@@ -2179,6 +2575,9 @@ local function createColor(option, parent, holder)
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = parent.content
     })
+    library:RegisterThemeObject(option.main, "TextColor3", function(theme)
+        return readThemeColor(theme, "Text.Color", Color3.fromRGB(255, 255, 255))
+    end)
 
     local colorBoxOutline = library:Create("ImageLabel", {
         Position = UDim2.new(1, -6, 0, 4),
@@ -2314,6 +2713,12 @@ local function createDivider(option, parent, holder)
         Size = UDim2.new(1, -10, 0, 2),
         Parent = option.main,
     })
+    library:RegisterThemeObject(option.divider, "BackgroundColor3", function(theme)
+        return readThemeColor(theme, "Divider.Color", Color3.fromRGB(50, 50, 50))
+    end)
+    library:RegisterThemeObject(option.divider, "BorderColor3", function(theme)
+        return readThemeColor(theme, "Divider.Color", Color3.fromRGB(50, 50, 50))
+    end)
 end
 
 local function loadOptions(option, holder)

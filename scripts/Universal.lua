@@ -8,9 +8,11 @@ local Library = loadstring(game:HttpGet(UILIB_URL, true))()
 
 local MainWindow = Library:CreateWindow("Levis Hub", UDim2.new(0, 20, 0, 20))
 local ThemeEditor = Library:CreateWindow("Theme Editor", UDim2.new(0, 270, 0, 20))
-local ThemeFiles = Library:CreateWindow("Theme Files", UDim2.new(0, 520, 0, 20))
-local ConfigEditor = Library:CreateWindow("Config Editor", UDim2.new(0, 270, 0, 340))
-local ConfigFiles = Library:CreateWindow("Config Files", UDim2.new(0, 520, 0, 340))
+local ThemeVisuals = Library:CreateWindow("Theme Visuals", UDim2.new(0, 520, 0, 20))
+local ThemeControls = Library:CreateWindow("Theme Controls", UDim2.new(0, 770, 0, 20))
+local ThemeFiles = Library:CreateWindow("Theme Files", UDim2.new(0, 1020, 0, 20))
+local ConfigEditor = Library:CreateWindow("Config Editor", UDim2.new(0, 270, 0, 500))
+local ConfigFiles = Library:CreateWindow("Config Files", UDim2.new(0, 520, 0, 500))
 local CursorWindow = Library:CreateWindow("Cursor", UDim2.new(0, 20, 0, 360))
 
 local statusLabel = MainWindow:AddLabel({ text = "Status: ready" })
@@ -53,6 +55,41 @@ end
 
 local refreshThemeList = function() end
 local refreshConfigList = function() end
+local syncThemeControls = function() end
+
+local function pathFlag(path)
+    return "theme_" .. tostring(path):gsub("[^%w]+", "_"):lower()
+end
+
+local function readPath(root, path, fallback)
+    local current = root
+    for key in tostring(path or ""):gmatch("[^%.]+") do
+        if type(current) ~= "table" or current[key] == nil then
+            return fallback
+        end
+        current = current[key]
+    end
+    return current == nil and fallback or current
+end
+
+local function writePath(root, path, value)
+    local current = root
+    local keys = {}
+    for key in tostring(path or ""):gmatch("[^%.]+") do
+        table.insert(keys, key)
+    end
+    for index = 1, #keys - 1 do
+        current[keys[index]] = current[keys[index]] or {}
+        current = current[keys[index]]
+    end
+    current[keys[#keys]] = value
+end
+
+local function setThemePath(path, value)
+    local patch = {}
+    writePath(patch, path, value)
+    Library:SetTheme(patch)
+end
 
 MainWindow:AddToggle({
     text = "Toggle",
@@ -157,7 +194,67 @@ CursorWindow:AddButton({
 })
 
 local themeName = "default"
+local themeCreator = ""
 local selectedTheme = "--"
+local syncingTheme = false
+local themeColorControls = {}
+local themeToggleControls = {}
+local themeBoxControls = {}
+
+local function themeValue(path, fallback)
+    return readPath(Library:GetTheme(), path, fallback)
+end
+
+local function themeStatus(message)
+    if not syncingTheme then
+        statusLabel:Set("Status: " .. message)
+    end
+end
+
+local function addThemeColor(window, text, path)
+    local control = window:AddColor({
+        text = text,
+        flag = pathFlag(path),
+        color = themeValue(path, Color3.fromRGB(255, 255, 255)),
+        skipConfig = true,
+        callback = function(color)
+            setThemePath(path, color)
+            themeStatus("theme color updated")
+        end
+    })
+    table.insert(themeColorControls, { path = path, control = control })
+    return control
+end
+
+local function addThemeToggle(window, text, path)
+    local control = window:AddToggle({
+        text = text,
+        flag = pathFlag(path),
+        state = themeValue(path, false) == true,
+        skipConfig = true,
+        callback = function(enabled)
+            setThemePath(path, enabled)
+            themeStatus("theme toggle updated")
+        end
+    })
+    table.insert(themeToggleControls, { path = path, control = control })
+    return control
+end
+
+local function addThemeBox(window, text, path, fallback)
+    local control = window:AddBox({
+        text = text,
+        flag = pathFlag(path),
+        value = tostring(themeValue(path, fallback or "")),
+        skipConfig = true,
+        callback = function(value)
+            setThemePath(path, tostring(value or ""))
+            themeStatus("theme value updated")
+        end
+    })
+    table.insert(themeBoxControls, { path = path, control = control, fallback = fallback or "" })
+    return control
+end
 
 local themeColor = ThemeEditor:AddColor({
     text = "Accent",
@@ -166,7 +263,7 @@ local themeColor = ThemeEditor:AddColor({
     skipConfig = true,
     callback = function(color)
         Library:SetTheme({ Accent = color })
-        statusLabel:Set("Status: theme accent stored")
+        themeStatus("theme accent stored")
     end
 })
 
@@ -234,24 +331,38 @@ local themeFont = ThemeEditor:AddList({
     skipConfig = true,
     callback = function(fontName)
         local ok = fontName == "Default" and Library:ResetFont() or Library:SetFont(fontName)
-        setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
+        if not syncingTheme then
+            setStatus(ok, "font set to " .. tostring(fontName), "invalid font")
+        end
     end
 })
 
-ThemeEditor:AddBox({
+local themeNameBox = ThemeEditor:AddBox({
     text = "Theme name",
     flag = "theme_name",
     value = themeName,
     skipConfig = true,
     callback = function(value)
         themeName = cleanName(value, "default")
+        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
+    end
+})
+
+local themeCreatorBox = ThemeEditor:AddBox({
+    text = "Theme creator",
+    flag = "theme_creator",
+    value = themeCreator,
+    skipConfig = true,
+    callback = function(value)
+        themeCreator = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
     end
 })
 
 ThemeEditor:AddButton({
     text = "Create theme",
     callback = function()
-        local ok, result = Library:SaveTheme(themeName)
+        local ok, result = Library:SaveTheme(themeName, { Name = themeName, Creator = themeCreator })
         setStatus(ok, "theme created", result)
         refreshThemeList(themeName)
     end
@@ -261,11 +372,76 @@ ThemeEditor:AddButton({
     text = "Reset theme",
     callback = function()
         Library:ResetTheme()
-        themeColor:SetColor(Library:GetTheme().Accent)
-        themeFont:SetValue("Default")
+        syncThemeControls()
         statusLabel:Set("Status: theme reset")
     end
 })
+
+ThemeVisuals:AddLabel({ text = "TopBar" })
+addThemeToggle(ThemeVisuals, "Topbar gradient", "TopBar.Line.Gradient")
+addThemeColor(ThemeVisuals, "Topbar main", "TopBar.Line.MainColor")
+addThemeColor(ThemeVisuals, "Topbar second", "TopBar.Line.SecondColor")
+addThemeColor(ThemeVisuals, "Topbar text", "TopBar.TextColor")
+addThemeColor(ThemeVisuals, "Topbar open icon", "TopBar.OnOffColor.On")
+addThemeColor(ThemeVisuals, "Topbar closed icon", "TopBar.OnOffColor.Off")
+ThemeVisuals:AddDivider()
+ThemeVisuals:AddLabel({ text = "Button" })
+addThemeToggle(ThemeVisuals, "Button gradient", "Button.Color.Gradient")
+addThemeColor(ThemeVisuals, "Button text", "Button.TextColor")
+addThemeColor(ThemeVisuals, "Button main", "Button.Color.MainColor")
+addThemeColor(ThemeVisuals, "Button second", "Button.Color.SecondColor")
+addThemeColor(ThemeVisuals, "Button hover", "Button.Color.HoverColor")
+
+ThemeControls:AddLabel({ text = "Text / Folder" })
+addThemeColor(ThemeControls, "Text color", "Text.Color")
+addThemeColor(ThemeControls, "Folder text", "Folder.TextColor")
+addThemeColor(ThemeControls, "Folder open icon", "Folder.OnOff.On")
+addThemeColor(ThemeControls, "Folder closed icon", "Folder.OnOff.Off")
+addThemeBox(ThemeControls, "Folder icon id", "Folder.OnOff.Icon", "rbxassetid://4918373417")
+ThemeControls:AddDivider()
+ThemeControls:AddLabel({ text = "Toggle" })
+addThemeBox(ThemeControls, "Toggle icon id", "Toggle.Icon", "rbxassetid://4919148038")
+addThemeColor(ThemeControls, "Toggle stroke", "Toggle.StrokeColor")
+addThemeColor(ThemeControls, "Toggle on", "Toggle.OnColor")
+addThemeColor(ThemeControls, "Toggle off", "Toggle.OffColor")
+addThemeColor(ThemeControls, "Toggle hover", "Toggle.HoverColor")
+ThemeControls:AddDivider()
+ThemeControls:AddLabel({ text = "Inputs" })
+addThemeColor(ThemeControls, "Textbox main", "TextBox.MainColor")
+addThemeColor(ThemeControls, "Slider background", "Slider.BackgroundColor")
+addThemeColor(ThemeControls, "Slider fill", "Slider.Color2")
+addThemeColor(ThemeControls, "Divider", "Divider.Color")
+
+syncThemeControls = function()
+    syncingTheme = true
+
+    local theme = Library:GetTheme()
+    local info = type(theme.Theme) == "table" and theme.Theme or {}
+    themeName = cleanName(info.Name, themeName)
+    themeCreator = tostring(info.Creator or "")
+
+    themeNameBox:SetValue(themeName, true)
+    themeCreatorBox:SetValue(themeCreator, true)
+    themeColor:SetColor(theme.Accent)
+    themeFont:SetValue(theme.Font or "Default")
+
+    for _, item in next, themeColorControls do
+        local color = readPath(theme, item.path)
+        if typeof(color) == "Color3" then
+            item.control:SetColor(color)
+        end
+    end
+
+    for _, item in next, themeToggleControls do
+        item.control:SetState(readPath(theme, item.path, false) == true)
+    end
+
+    for _, item in next, themeBoxControls do
+        item.control:SetValue(tostring(readPath(theme, item.path, item.fallback)), true)
+    end
+
+    syncingTheme = false
+end
 
 local themeDefaultLabel = ThemeFiles:AddLabel({ text = "Default theme: none" })
 
@@ -312,8 +488,7 @@ ThemeFiles:AddButton({
         local name = selectedName(selectedTheme, themeName, "default")
         local ok, result = Library:LoadTheme(name)
         if ok then
-            themeColor:SetColor(Library:GetTheme().Accent)
-            themeFont:SetValue(Library:GetTheme().Font or "Default")
+            syncThemeControls()
         end
         setStatus(ok, "theme loaded", result)
     end
@@ -323,7 +498,7 @@ ThemeFiles:AddButton({
     text = "Overwrite theme",
     callback = function()
         local name = selectedName(selectedTheme, themeName, "default")
-        local ok, result = Library:SaveTheme(name)
+        local ok, result = Library:SaveTheme(name, { Name = themeName, Creator = themeCreator })
         setStatus(ok, "theme overwritten", result)
         refreshThemeList(name)
     end
@@ -431,8 +606,7 @@ ConfigFiles:AddButton({
     callback = function()
         local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
         if ok then
-            themeColor:SetColor(Library:GetTheme().Accent)
-            themeFont:SetValue(Library:GetTheme().Font or "Default")
+            syncThemeControls()
             updateAutoloadLabel()
         end
         setStatus(ok, "config loaded", result)
@@ -490,8 +664,7 @@ refreshThemeList()
 refreshConfigList()
 
 delay(0.35, function()
-    themeColor:SetColor(Library:GetTheme().Accent)
-    themeFont:SetValue(Library:GetTheme().Font or "Default")
+    syncThemeControls()
     refreshThemeList(selectedTheme)
     refreshConfigList(selectedConfig)
 end)
