@@ -43,7 +43,8 @@ local DEFAULT_THEME = {
         TextColor = Color3.fromRGB(255, 255, 255),
         OnOffColor = {
             On = Color3.fromRGB(50, 50, 50),
-            Off = Color3.fromRGB(30, 30, 30)
+            Off = Color3.fromRGB(30, 30, 30),
+            Icon = DEFAULT_FOLDER_ICON
         }
     },
     Folder = {
@@ -171,6 +172,23 @@ local function updateDragTarget(dt)
         dragVelocityX = 0
     end
     dragLastMouseX = mouse.X
+end
+
+local function cancelDrag()
+    dragging = false
+    if dragObject and dragOriginalClips ~= nil then
+        pcall(function()
+            dragObject.ClipsDescendants = dragOriginalClips
+        end)
+    end
+    dragObject = nil
+    dragTarget = nil
+    dragStart = nil
+    startPos = nil
+    dragLastMouseX = nil
+    dragVelocityX = 0
+    dragRotationVelocity = 0
+    dragOriginalClips = nil
 end
 
 local function colorToTable(color)
@@ -346,6 +364,7 @@ local function normalizeThemeInput(theme)
     assignAlias(output, { "TopBar", "TextColor" }, theme.TopBar_TextColor)
     assignAlias(output, { "TopBar", "OnOffColor", "On" }, theme.TopBar_OnColor)
     assignAlias(output, { "TopBar", "OnOffColor", "Off" }, theme.TopBar_OffColor)
+    assignAlias(output, { "TopBar", "OnOffColor", "Icon" }, theme.TopBar_Icon or theme.TopBar_IconId or theme.TopBar_TriangleIcon)
 
     assignAlias(output, { "Folder", "TextColor" }, theme.Folder_TextColor)
     assignAlias(output, { "Folder", "OnOff", "On" }, theme.Folder_OnColor)
@@ -380,10 +399,12 @@ local function normalizeThemeInput(theme)
         end
 
         assignAlias(output, { "TopBar", "TextColor" }, topBar.TextColor or topBar.Text_Color)
+        assignAlias(output, { "TopBar", "OnOffColor", "Icon" }, topBar.Icon or topBar.icon or topBar.TriangleIcon or topBar.Triangle_Icon)
         local onOffColor = normalizeOnOff(topBar.OnOffColor or topBar.On_Off_Color)
         if onOffColor then
             assignAlias(output, { "TopBar", "OnOffColor", "On" }, onOffColor.On)
             assignAlias(output, { "TopBar", "OnOffColor", "Off" }, onOffColor.Off)
+            assignAlias(output, { "TopBar", "OnOffColor", "Icon" }, onOffColor.Icon)
         end
     end
 
@@ -1211,6 +1232,12 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         return parentTable.open and readThemeColor(theme, "TopBar.OnOffColor.On", Color3.fromRGB(50, 50, 50)) or
         readThemeColor(theme, "TopBar.OnOffColor.Off", Color3.fromRGB(30, 30, 30))
     end
+    local function closeIcon(theme)
+        if subHolder then
+            return normalizeAssetId(readThemeString(theme, "Folder.OnOff.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON)
+        end
+        return normalizeAssetId(readThemeString(theme, "TopBar.OnOffColor.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON)
+    end
 
     parentTable.main = library:Create("ImageButton", {
         LayoutOrder = subHolder and parentTable.position or 0,
@@ -1278,16 +1305,14 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Size = UDim2.new(1, -size - 10, 1, -size - 10),
         Rotation = parentTable.open and 90 or 180,
         BackgroundTransparency = 1,
-        Image = subHolder and normalizeAssetId(getThemeString("Folder.OnOff.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON) or DEFAULT_FOLDER_ICON,
+        Image = closeIcon(library.theme),
         ImageColor3 = closeColor(library.theme),
         ScaleType = Enum.ScaleType.Fit,
         Parent = closeHolder
     })
-    if subHolder then
-        library:RegisterThemeObject(close, "Image", function(theme)
-            return normalizeAssetId(readThemeString(theme, "Folder.OnOff.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON)
-        end)
-    end
+    library:RegisterThemeObject(close, "Image", function(theme)
+        return closeIcon(theme)
+    end)
     library:RegisterThemeObject(close, "ImageColor3", function(theme)
         return closeColor(theme)
     end)
@@ -1317,6 +1342,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
 
         title.InputBegan:connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                if not library.open or library.isAnimating then return end
                 dragObject = parentTable.main
                 dragging = true
                 dragStart = inputService:GetMouseLocation()
@@ -1338,6 +1364,7 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
 
     closeHolder.InputBegan:connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if not library.open or library.isAnimating then return end
             parentTable.open = not parentTable.open
             library:ApplyTheme()
             tweenService:Create(close, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -3046,6 +3073,15 @@ local UnlockMouse
 
 local function collectFadeTargets(root)
     local targets = {}
+    library._fadeDefaults = library._fadeDefaults or setmetatable({}, { __mode = "k" })
+
+    local function cloneProps(props)
+        local clone = {}
+        for property, value in next, props do
+            clone[property] = value
+        end
+        return clone
+    end
 
     local function add(object)
         local props = {}
@@ -3069,6 +3105,12 @@ local function collectFadeTargets(root)
         end
 
         if next(props) then
+            local defaults = library._fadeDefaults[object]
+            if defaults then
+                props = cloneProps(defaults)
+            else
+                library._fadeDefaults[object] = cloneProps(props)
+            end
             table.insert(targets, {
                 object = object,
                 props = props,
@@ -3085,21 +3127,36 @@ local function collectFadeTargets(root)
     return targets
 end
 
-local function setFadeTargetsHidden(targets)
+local function applyFadeTargets(targets, hidden)
     for _, item in next, targets do
         pcall(function()
-            for property, value in next, item.hidden do
+            for property, value in next, hidden and item.hidden or item.props do
                 item.object[property] = value
             end
         end)
     end
 end
 
+local function setFadeTargetsHidden(targets)
+    applyFadeTargets(targets, true)
+end
+
 local function tweenFadeTargets(targets, hidden, duration)
     local info = TweenInfo.new(duration or 0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
     for _, item in next, targets do
         pcall(function()
-            tweenService:Create(item.object, info, hidden and item.hidden or item.props):Play()
+            local goal = hidden and item.hidden or item.props
+            local changed = {}
+            local hasChanged = false
+            for property, value in next, goal do
+                if item.object[property] ~= value then
+                    changed[property] = value
+                    hasChanged = true
+                end
+            end
+            if hasChanged then
+                tweenService:Create(item.object, info, changed):Play()
+            end
         end)
     end
 end
@@ -3262,10 +3319,12 @@ function library:Close()
         tweenFadeTargets(targets, false, 0.24)
 
         delay(duration + maxStagger, function()
+            applyFadeTargets(targets, false)
             self:ApplyTheme()
             self.isAnimating = false
         end)
     else
+        cancelDrag()
         if self.cursor then
             self.cursor.Visible = false
         end
@@ -3300,6 +3359,7 @@ function library:Close()
         end)
 
         delay(duration + maxStagger, function()
+            applyFadeTargets(targets, true)
             for _, window in next, self.windows do
                 if window.main and not self.open then
                     window.main.Visible = false
@@ -3315,15 +3375,7 @@ end
 function library:Destroy()
     self.open = false
     self.isAnimating = false
-    dragging = false
-    dragObject = nil
-    dragTarget = nil
-    dragStart = nil
-    startPos = nil
-    dragLastMouseX = nil
-    dragVelocityX = 0
-    dragRotationVelocity = 0
-    dragOriginalClips = nil
+    cancelDrag()
 
     if self.activePopup then
         pcall(function()
@@ -3345,6 +3397,7 @@ function library:Destroy()
     self.cursor = nil
     self.cursorImage = nil
     self._fadeTargets = nil
+    self._fadeDefaults = nil
     self.themeObjects = {}
     self.originalFonts = {}
 
@@ -3363,6 +3416,7 @@ function library:Unload()
     if self.isAnimating or not self.base then return false end
     self.isAnimating = true
     self.open = false
+    cancelDrag()
 
     if self.cursor then
         self.cursor.Visible = false

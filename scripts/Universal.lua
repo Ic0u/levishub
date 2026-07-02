@@ -352,52 +352,6 @@ local themeFont = ThemeFolder:AddList({
     end
 })
 
-local CursorTheme = ThemeFolder:AddFolder("Cursor")
-addThemeToggle(CursorTheme, "Custom cursor", "Cursor.Enabled")
-addThemeBox(CursorTheme, "Cursor id", "Cursor.Image", "")
-
-local themeNameBox = ThemeFolder:AddBox({
-    text = "Theme name",
-    flag = "theme_name",
-    value = themeName,
-    skipConfig = true,
-    callback = function(value)
-        if syncingTheme then return end
-        themeName = cleanName(value, "default")
-        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
-    end
-})
-
-local themeCreatorBox = ThemeFolder:AddBox({
-    text = "Theme creator",
-    flag = "theme_creator",
-    value = themeCreator,
-    skipConfig = true,
-    callback = function(value)
-        if syncingTheme then return end
-        themeCreator = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
-    end
-})
-
-ThemeFolder:AddButton({
-    text = "Create theme",
-    callback = function()
-        local ok, result = Library:SaveTheme(themeName, { Name = themeName, Creator = themeCreator })
-        setStatus(ok, "theme created", result)
-        refreshThemeList(themeName)
-    end
-})
-
-ThemeFolder:AddButton({
-    text = "Reset theme",
-    callback = function()
-        Library:ResetTheme()
-        syncThemeControls()
-        statusLabel:Set("Status: theme reset")
-    end
-})
-
 local TopBarTheme = ThemeFolder:AddFolder("TopBar")
 addThemeToggle(TopBarTheme, "Gradient", "TopBar.Line.Gradient")
 addThemeColor(TopBarTheme, "Main", "TopBar.Line.MainColor")
@@ -405,6 +359,11 @@ addThemeColor(TopBarTheme, "Second", "TopBar.Line.SecondColor")
 addThemeColor(TopBarTheme, "Text", "TopBar.TextColor")
 addThemeColor(TopBarTheme, "Open icon", "TopBar.OnOffColor.On")
 addThemeColor(TopBarTheme, "Closed icon", "TopBar.OnOffColor.Off")
+addThemeBox(TopBarTheme, "Icon id", "TopBar.OnOffColor.Icon", "rbxassetid://4918373417")
+
+local CursorTheme = ThemeFolder:AddFolder("Cursor")
+addThemeToggle(CursorTheme, "Custom cursor", "Cursor.Enabled")
+addThemeBox(CursorTheme, "Cursor id", "Cursor.Image", "")
 
 local FolderTheme = ThemeFolder:AddFolder("Folder")
 addThemeColor(FolderTheme, "Text", "Folder.TextColor")
@@ -434,6 +393,49 @@ addThemeColor(TextInputTheme, "Slider fill", "Slider.Color2")
 addThemeColor(TextInputTheme, "Divider", "Divider.Color")
 
 local ThemeFiles = ThemeFolder:AddFolder("Theme Files")
+
+local themeNameBox = ThemeFiles:AddBox({
+    text = "Theme name",
+    flag = "theme_name",
+    value = themeName,
+    skipConfig = true,
+    callback = function(value)
+        if syncingTheme then return end
+        themeName = cleanName(value, "default")
+        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
+    end
+})
+
+local themeCreatorBox = ThemeFiles:AddBox({
+    text = "Theme creator",
+    flag = "theme_creator",
+    value = themeCreator,
+    skipConfig = true,
+    callback = function(value)
+        if syncingTheme then return end
+        themeCreator = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        Library:SetThemeInfo({ Name = themeName, Creator = themeCreator })
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Create theme",
+    callback = function()
+        local ok, result = Library:SaveTheme(themeName, { Name = themeName, Creator = themeCreator })
+        setStatus(ok, "theme created", result)
+        refreshThemeList(themeName)
+    end
+})
+
+ThemeFiles:AddButton({
+    text = "Reset theme",
+    callback = function()
+        Library:ResetTheme()
+        syncThemeControls()
+        statusLabel:Set("Status: theme reset")
+    end
+})
+
 local themeDefaultLabel = ThemeFiles:AddLabel({ text = "Default theme: none" })
 
 local themeList = ThemeFiles:AddList({
