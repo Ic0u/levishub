@@ -6,6 +6,7 @@ local MAX_DRAG_ROTATION = 18
 local DEFAULT_ACCENT = Color3.fromRGB(0, 255, 111)
 local DEFAULT_FOLDER_ICON = "rbxassetid://4918373417"
 local DEFAULT_TOGGLE_ICON = "rbxassetid://4919148038"
+local PANEL_IMAGE = "rbxassetid://3570695787"
 local ACCENT_LINKED_THEME_PATHS = {
     "TopBar.Line.SecondColor",
     "Toggle.OnColor",
@@ -107,6 +108,9 @@ local library = {
     defaultTheme = cloneValue(DEFAULT_THEME),
     themeObjects = {},
     notifications = {},
+    savedGuiLayout = nil,
+    uiTransparency = 0,
+    _uiTransparencyDefaults = nil,
     liveAccentThemes = true
 }
 
@@ -215,6 +219,108 @@ local function tableToColor(value)
             return Color3.fromRGB(math.clamp(r, 0, 255), math.clamp(g, 0, 255), math.clamp(b, 0, 255))
         end
     end
+end
+
+local function uDim2ToTable(value)
+    if typeof(value) ~= "UDim2" then
+        return nil
+    end
+    return {
+        XScale = value.X.Scale,
+        XOffset = value.X.Offset,
+        YScale = value.Y.Scale,
+        YOffset = value.Y.Offset
+    }
+end
+
+local function tableToUDim2(value)
+    if typeof(value) == "UDim2" then
+        return value
+    end
+    if type(value) ~= "table" then
+        return nil
+    end
+
+    local xScale = tonumber(value.XScale or value.xScale or value.XS or value.xs or value[1]) or 0
+    local xOffset = tonumber(value.XOffset or value.xOffset or value.XO or value.xo or value[2]) or 0
+    local yScale = tonumber(value.YScale or value.yScale or value.YS or value.ys or value[3]) or 0
+    local yOffset = tonumber(value.YOffset or value.yOffset or value.YO or value.yo or value[4]) or 0
+    return UDim2.new(xScale, xOffset, yScale, yOffset)
+end
+
+local function transparencyWithPercent(base, percent)
+    base = math.clamp(tonumber(base) or 0, 0, 1)
+    percent = math.clamp(tonumber(percent) or 0, 0, 100) / 100
+    return math.clamp(base + ((1 - base) * percent), 0, 1)
+end
+
+local function inferBaseTransparency(current, percent)
+    current = math.clamp(tonumber(current) or 0, 0, 1)
+    percent = math.clamp(tonumber(percent) or 0, 0, 100) / 100
+    if percent >= 0.999 then
+        return current
+    end
+    return math.clamp((current - percent) / (1 - percent), 0, 1)
+end
+
+local function isPanelImage(object)
+    return (object:IsA("ImageLabel") or object:IsA("ImageButton")) and tostring(object.Image) == PANEL_IMAGE
+end
+
+local function rememberTransparencyDefault(object, property, value)
+    library._uiTransparencyDefaults = library._uiTransparencyDefaults or setmetatable({}, { __mode = "k" })
+    library._uiTransparencyDefaults[object] = library._uiTransparencyDefaults[object] or {}
+    if library._uiTransparencyDefaults[object][property] == nil then
+        library._uiTransparencyDefaults[object][property] = value
+    end
+end
+
+local function setPanelTransparency(object, property, base, percent)
+    local value = transparencyWithPercent(base, percent)
+    object[property] = value
+
+    if library._fadeDefaults and library._fadeDefaults[object] and library._fadeDefaults[object][property] ~= nil then
+        library._fadeDefaults[object][property] = value
+    end
+end
+
+local function applyPanelTransparency(root, percent, previousPercent)
+    if not root then return end
+    library._uiTransparencyDefaults = library._uiTransparencyDefaults or setmetatable({}, { __mode = "k" })
+    previousPercent = previousPercent or library.uiTransparency
+
+    local function applyObject(object)
+        if object:IsA("GuiObject") then
+            local defaults = library._uiTransparencyDefaults[object] or {}
+            local backgroundBase = defaults.BackgroundTransparency
+            if backgroundBase == nil and object.BackgroundTransparency < 1 then
+                backgroundBase = inferBaseTransparency(object.BackgroundTransparency, previousPercent)
+                rememberTransparencyDefault(object, "BackgroundTransparency", backgroundBase)
+            end
+            if backgroundBase ~= nil and backgroundBase < 1 then
+                setPanelTransparency(object, "BackgroundTransparency", backgroundBase, percent)
+            end
+        end
+
+        if isPanelImage(object) then
+            local defaults = library._uiTransparencyDefaults[object] or {}
+            local imageBase = defaults.ImageTransparency
+            if imageBase == nil and object.ImageTransparency < 1 then
+                imageBase = inferBaseTransparency(object.ImageTransparency, previousPercent)
+                rememberTransparencyDefault(object, "ImageTransparency", imageBase)
+            end
+            if imageBase ~= nil and imageBase < 1 then
+                setPanelTransparency(object, "ImageTransparency", imageBase, percent)
+            end
+        end
+    end
+
+    applyObject(root)
+    for _, object in next, root:GetDescendants() do
+        applyObject(object)
+    end
+
+    library._fadeTargets = nil
 end
 
 local function normalizeAssetId(imageId, fallback)
@@ -1086,6 +1192,112 @@ function library:LoadDefaultTheme()
     return self:LoadTheme(name)
 end
 
+function library:GetGuiLayout()
+    local layout = {
+        windows = {}
+    }
+
+    for index, window in ipairs(self.windows) do
+        local position = (not self.open and window._visiblePosition) or (window.main and window.main.Position) or window.windowPosition or window.defaultWindowPosition
+        table.insert(layout.windows, {
+            index = index,
+            title = window.title,
+            position = uDim2ToTable(position),
+            open = window.open == true
+        })
+    end
+
+    return layout
+end
+
+function library:SaveGuiLayout()
+    self.savedGuiLayout = self:GetGuiLayout()
+    return true, self.savedGuiLayout
+end
+
+function library:LoadGuiLayout(layout)
+    layout = layout or self.savedGuiLayout
+    if type(layout) ~= "table" then
+        return false, "no saved gui layout"
+    end
+
+    local windows = type(layout.windows) == "table" and layout.windows or layout
+    for _, item in next, windows do
+        if type(item) == "table" then
+            local index = tonumber(item.index)
+            local window = index and self.windows[index]
+
+            if not window and item.title then
+                for _, candidate in ipairs(self.windows) do
+                    if candidate.title == item.title then
+                        window = candidate
+                        break
+                    end
+                end
+            end
+
+            if window then
+                local position = tableToUDim2(item.position or item.Position)
+                if position then
+                    window.windowPosition = position
+                    window._visiblePosition = position
+                    if window.main then
+                        window.main.Position = position
+                    end
+                end
+
+                if item.open ~= nil then
+                    if window.SetOpen then
+                        window:SetOpen(item.open == true, false)
+                    else
+                        window.open = item.open == true
+                    end
+                end
+            end
+        end
+    end
+
+    self.savedGuiLayout = cloneValue(layout)
+    return true, self.savedGuiLayout
+end
+
+function library:ResetGuiLayout()
+    for _, window in ipairs(self.windows) do
+        local position = window.defaultWindowPosition or window.windowPosition
+        if position then
+            window.windowPosition = position
+            window._visiblePosition = position
+            if window.main then
+                window.main.Position = position
+                window.main.Rotation = 0
+            end
+        end
+
+        local openState = window.defaultOpen ~= false
+        if window.SetOpen then
+            window:SetOpen(openState, false)
+        else
+            window.open = openState
+        end
+    end
+
+    return true, self:GetGuiLayout()
+end
+
+function library:SetUITransparency(percent)
+    percent = math.clamp(tonumber(percent) or 0, 0, 100)
+    local previousPercent = self.uiTransparency or 0
+    self.uiTransparency = percent
+    if self.base then
+        applyPanelTransparency(self.base, percent, previousPercent)
+    end
+    return true
+end
+
+function library:GetUITransparency()
+    return self.uiTransparency or 0
+end
+
 function library:SaveConfig(name)
     local ok, err = ensureSaveFolders()
     if not ok then return false, err end
@@ -1106,7 +1318,9 @@ function library:SaveConfig(name)
 
     local encoded = encodeJson({
         flags = values,
-        theme = serializeThemeValue(self:GetTheme())
+        theme = serializeThemeValue(self:GetTheme()),
+        layout = self:GetGuiLayout(),
+        uiTransparency = self:GetUITransparency()
     })
     if not encoded then
         return false, "failed to encode config"
@@ -1168,6 +1382,20 @@ function library:LoadConfig(name)
             end
         end
     end
+
+    if decoded.uiTransparency ~= nil then
+        self:SetUITransparency(decoded.uiTransparency)
+    end
+
+    if type(decoded.layout) == "table" then
+        self:LoadGuiLayout(decoded.layout)
+    end
+
+    delay(0.3, function()
+        if self.base then
+            self:SetUITransparency(self.uiTransparency)
+        end
+    end)
 
     return true, path
 end
@@ -1365,6 +1593,7 @@ function library:Notify(message, duration, title)
     title = tostring(title or self.title or "Levis Hub")
     duration = math.max(tonumber(duration) or 3, 1)
     self.notifications = self.notifications or {}
+    local panelTransparency = transparencyWithPercent(0, self.uiTransparency)
 
     local frame = self:Create("Frame", {
         ZIndex = 220,
@@ -1375,6 +1604,12 @@ function library:Notify(message, duration, title)
         BackgroundTransparency = 1,
         BorderColor3 = Color3.fromRGB(0, 0, 0),
         Parent = self.base
+    })
+    rememberTransparencyDefault(frame, "BackgroundTransparency", 0)
+
+    self:Create("UICorner", {
+        CornerRadius = UDim.new(0, 4),
+        Parent = frame
     })
 
     local stroke = self:Create("UIStroke", {
@@ -1428,7 +1663,14 @@ function library:Notify(message, duration, title)
         BackgroundColor3 = Color3.fromRGB(40, 40, 40),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
+        ClipsDescendants = true,
         Parent = frame
+    })
+    rememberTransparencyDefault(progressBack, "BackgroundTransparency", 0)
+
+    self:Create("UICorner", {
+        CornerRadius = UDim.new(0, 4),
+        Parent = progressBack
     })
 
     local progress = self:Create("Frame", {
@@ -1438,6 +1680,12 @@ function library:Notify(message, duration, title)
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Parent = progressBack
+    })
+    rememberTransparencyDefault(progress, "BackgroundTransparency", 0)
+
+    self:Create("UICorner", {
+        CornerRadius = UDim.new(0, 4),
+        Parent = progress
     })
     self:RegisterThemeObject(progress, "BackgroundColor3", function(theme)
         return theme.Accent or DEFAULT_ACCENT
@@ -1455,7 +1703,7 @@ function library:Notify(message, duration, title)
     self:LayoutNotifications()
 
     tweenService:Create(frame, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        BackgroundTransparency = 0
+        BackgroundTransparency = panelTransparency
     }):Play()
     tweenService:Create(stroke, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Transparency = 0
@@ -1467,10 +1715,10 @@ function library:Notify(message, duration, title)
         TextTransparency = 0
     }):Play()
     tweenService:Create(progressBack, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.12), {
-        BackgroundTransparency = 0
+        BackgroundTransparency = panelTransparency
     }):Play()
     tweenService:Create(progress, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.12), {
-        BackgroundTransparency = 0
+        BackgroundTransparency = panelTransparency
     }):Play()
     tweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, 0, 1, 0)
@@ -1513,9 +1761,14 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         return normalizeAssetId(readThemeString(theme, "TopBar.OnOffColor.Icon", DEFAULT_FOLDER_ICON), DEFAULT_FOLDER_ICON)
     end
 
+    local initialPosition = parentTable.windowPosition or parentTable.defaultWindowPosition or UDim2.new(0, 20 + (250 * (parentTable.position or 0)), 0, 20)
+    parentTable.windowPosition = initialPosition
+    parentTable.defaultWindowPosition = parentTable.defaultWindowPosition or initialPosition
+    parentTable.defaultOpen = parentTable.defaultOpen ~= false
+
     parentTable.main = library:Create("ImageButton", {
         LayoutOrder = subHolder and parentTable.position or 0,
-        Position = parentTable.windowPosition or UDim2.new(0, 20 + (250 * (parentTable.position or 0)), 0, 20),
+        Position = initialPosition,
         Size = UDim2.new(0, 230, 0, size),
         BackgroundTransparency = 1,
         Image = "rbxassetid://3570695787",
@@ -1603,10 +1856,13 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         Parent = parentTable.content
     })
 
+    local function getHolderSize()
+        return #parentTable.options > 0 and parentTable.open and UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or UDim2.new(0, 230, 0, size)
+    end
+
     local function refreshHolderSize()
         parentTable.content.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
-        parentTable.main.Size = #parentTable.options > 0 and parentTable.open and
-        UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or UDim2.new(0, 230, 0, size)
+        parentTable.main.Size = getHolderSize()
         if parentTable.parentHolder and parentTable.parentHolder.RefreshSize then
             parentTable.parentHolder.RefreshSize()
         end
@@ -1643,25 +1899,42 @@ local function createOptionHolder(holderTitle, parent, parentTable, subHolder)
         end)
     end
 
-    closeHolder.InputBegan:connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            if not library.open or library.isAnimating then return end
-            parentTable.open = not parentTable.open
-            library:ApplyTheme()
+    function parentTable:SetOpen(openState, animate)
+        self.open = openState == true
+        library:ApplyTheme()
+
+        local targetSize = getHolderSize()
+        if animate then
             tweenService:Create(close, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { Rotation = parentTable.open and 90 or 180, ImageColor3 = closeColor(library.theme) }):Play()
+                { Rotation = self.open and 90 or 180, ImageColor3 = closeColor(library.theme) }):Play()
             if subHolder then
                 tweenService:Create(title, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    { BackgroundColor3 = parentTable.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10) })
+                    { BackgroundColor3 = self.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10) })
                     :Play()
             else
                 tweenService:Create(round, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                     { ImageColor3 = topBarMainColor(library.theme) }):Play()
             end
-            parentTable.main:TweenSize(
-            #parentTable.options > 0 and parentTable.open and UDim2.new(0, 230, 0, layout.AbsoluteContentSize.Y + size) or
-            UDim2.new(0, 230, 0, size), "Out", "Quad", 0.2, true)
+            self.main:TweenSize(targetSize, "Out", "Quad", 0.2, true)
             delay(0.22, refreshHolderSize)
+        else
+            close.Rotation = self.open and 90 or 180
+            close.ImageColor3 = closeColor(library.theme)
+            if subHolder then
+                title.BackgroundColor3 = self.open and Color3.fromRGB(16, 16, 16) or Color3.fromRGB(10, 10, 10)
+            elseif round then
+                round.ImageColor3 = topBarMainColor(library.theme)
+            end
+            refreshHolderSize()
+        end
+
+        return true
+    end
+
+    closeHolder.InputBegan:connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if not library.open or library.isAnimating then return end
+            parentTable:SetOpen(not parentTable.open, true)
         end
     end)
 
@@ -3339,11 +3612,19 @@ local function getFnctions(parent)
 end
 
 function library:CreateWindow(title, position)
-    local window = { title = tostring(title), options = {}, open = true, canInit = true, init = false, position = #self
-    .windows }
-    if typeof(position) == "UDim2" then
-        window.windowPosition = position
-    end
+    local windowIndex = #self.windows
+    local defaultPosition = typeof(position) == "UDim2" and position or UDim2.new(0, 20 + (250 * windowIndex), 0, 20)
+    local window = {
+        title = tostring(title),
+        options = {},
+        open = true,
+        defaultOpen = true,
+        canInit = true,
+        init = false,
+        position = windowIndex,
+        windowPosition = defaultPosition,
+        defaultWindowPosition = defaultPosition
+    }
     getFnctions(window)
 
     table.insert(library.windows, window)
@@ -3553,9 +3834,10 @@ function library:Init()
 
     playIntro(self.base, self.windows)
 
-    delay(0.15, function()
+    delay(0.6, function()
         self:LoadDefaultTheme()
         self:LoadAutoloadConfig()
+        self:SetUITransparency(self.uiTransparency)
     end)
 end
 
@@ -3690,6 +3972,7 @@ function library:Destroy()
     self.cursorImage = nil
     self._fadeTargets = nil
     self._fadeDefaults = nil
+    self._uiTransparencyDefaults = nil
     self.themeObjects = {}
     self.originalFonts = {}
     self.notifications = {}

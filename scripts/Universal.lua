@@ -254,6 +254,44 @@ end
 local ThemeFolder = SettingsWindow:AddFolder("Theme")
 local ConfigFolder = SettingsWindow:AddFolder("Configs")
 
+local uiTransparencySlider = SettingsWindow:AddSlider({
+    text = "UI Transparency (%)",
+    flag = "ui_transparency",
+    value = Library:GetUITransparency(),
+    min = 0,
+    max = 100,
+    float = 1,
+    skipConfig = true,
+    callback = function(value)
+        Library:SetUITransparency(value)
+        statusLabel:Set("Status: ui transparency " .. tostring(value) .. "%")
+    end
+})
+
+SettingsWindow:AddButton({
+    text = "Save Gui Layout",
+    callback = function()
+        local ok, result = Library:SaveGuiLayout()
+        setStatus(ok, "gui layout saved", result)
+    end
+})
+
+SettingsWindow:AddButton({
+    text = "Load Saved UI Layout",
+    callback = function()
+        local ok, result = Library:LoadGuiLayout()
+        setStatus(ok, "gui layout loaded", result)
+    end
+})
+
+SettingsWindow:AddButton({
+    text = "Reset UI Layout",
+    callback = function()
+        local ok, result = Library:ResetGuiLayout()
+        setStatus(ok, "gui layout reset", result)
+    end
+})
+
 SettingsWindow:AddBind({
     text = "Panic Key",
     flag = "panic_key",
@@ -736,6 +774,7 @@ ConfigFolder:AddButton({
     callback = function()
         local ok, result = Library:LoadConfig(selectedName(selectedConfig, configName, "default"))
         if ok then
+            uiTransparencySlider:SetValue(Library:GetUITransparency())
             syncThemeControls()
             updateAutoloadLabel()
         end
@@ -793,7 +832,8 @@ Library:Init()
 refreshThemeList()
 refreshConfigList()
 
-delay(0.35, function()
+delay(0.75, function()
+    uiTransparencySlider:SetValue(Library:GetUITransparency())
     syncThemeControls()
     refreshThemeList(selectedTheme)
     refreshConfigList(selectedConfig)
